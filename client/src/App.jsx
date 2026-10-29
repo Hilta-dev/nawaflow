@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
 import Login from './pages/Login'
+import MicTest from './pages/MicTest'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -35,6 +36,7 @@ function App() {
       <h1>NawaFlow</h1>
       <p>Signed in as {session.user.email}</p>
       <p>Server status: {status}</p>
+            <MicTest />
       <button onClick={() => supabase.auth.signOut()}>Sign out</button>
     </div>
   )
