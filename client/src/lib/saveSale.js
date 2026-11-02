@@ -15,28 +15,33 @@ export async function saveSale(parsedSale, userId) {
   if (!action) throw new Error('No record_sale action in parsed result')
 
   const customerName = action.customer?.trim() || 'Unknown customer'
+  const saleTotal    = Number(action.total ?? 0)
+  const salePaid     = Number(action.paid  ?? 0)
+  const unpaid       = Math.max(0, saleTotal - salePaid)
 
-  // 1. find or create the customer
-  let customerId = null
+  // 1. find or create the customer; read current balance_owed
   const { data: existing, error: findErr } = await supabase
     .from('customers')
-    .select('id')
+    .select('id, balance_owed')
     .eq('user_id', userId)
     .ilike('name', customerName)
     .maybeSingle()
 
   if (findErr) throw new Error('Customer lookup failed: ' + findErr.message)
 
+  let customerId, currentBalance
   if (existing) {
-    customerId = existing.id
+    customerId     = existing.id
+    currentBalance = Number(existing.balance_owed ?? 0)
   } else {
     const { data: created, error: createErr } = await supabase
       .from('customers')
-      .insert({ user_id: userId, name: customerName })
-      .select('id')
+      .insert({ user_id: userId, name: customerName, balance_owed: 0 })
+      .select('id, balance_owed')
       .single()
     if (createErr) throw new Error('Customer create failed: ' + createErr.message)
-    customerId = created.id
+    customerId     = created.id
+    currentBalance = 0
   }
 
   // 2. insert the transaction
@@ -46,8 +51,8 @@ export async function saveSale(parsedSale, userId) {
       user_id:     userId,
       customer_id: customerId,
       type:        'sale',
-      total:       action.total  ?? 0,
-      paid:        action.paid   ?? 0,
+      total:       saleTotal,
+      paid:        salePaid,
       note:        parsedSale.clarifying_question ?? null,
     })
     .select('id')
@@ -55,7 +60,7 @@ export async function saveSale(parsedSale, userId) {
 
   if (txnErr) throw new Error('Transaction insert failed: ' + txnErr.message)
 
-  // 3. insert line items — save the free-text name and unit from the parse
+  // 3. insert line items
   const items = (action.items ?? []).map((item) => ({
     transaction_id: txn.id,
     product_id:     null,
@@ -71,6 +76,14 @@ export async function saveSale(parsedSale, userId) {
       .insert(items)
     if (itemsErr) throw new Error('Items insert failed: ' + itemsErr.message)
   }
+
+  // 4. update customers.balance_owed — add the unpaid portion of this sale
+  const { error: balErr } = await supabase
+    .from('customers')
+    .update({ balance_owed: currentBalance + unpaid })
+    .eq('id', customerId)
+
+  if (balErr) throw new Error('Balance update failed: ' + balErr.message)
 
   return { ok: true, transactionId: txn.id }
 }

@@ -15,7 +15,7 @@ function Dashboard({ userId, onRefresh }) {
   if (loading) return <p style={msgStyle}>Loading…</p>
   if (error)   return <p style={{ ...msgStyle, color: '#dc2626' }}>Error: {error}</p>
 
-  const { totalSales, totalOwed, customerCount, debtors, recentSales } = data
+  const { totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments } = data
 
   // Empty state
   if (totalSales === 0) {
@@ -70,7 +70,9 @@ function Dashboard({ userId, onRefresh }) {
       {/* recent sales */}
       <section style={{ marginTop: 20 }}>
         <h4 style={sectionHead}>Recent sales</h4>
-        {recentSales.map((s) => (
+        {recentSales.length === 0
+          ? <p style={{ fontSize: 13, color: '#57606a' }}>No sales recorded yet.</p>
+          : recentSales.map((s) => (
           <div key={s.id} style={saleCard}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <strong>{s.customerName}</strong>
@@ -100,6 +102,26 @@ function Dashboard({ userId, onRefresh }) {
           </div>
         ))}
       </section>
+
+      {/* recent payments */}
+      {recentPayments.length > 0 && (
+        <section style={{ marginTop: 20 }}>
+          <h4 style={sectionHead}>Recent payments received</h4>
+          {recentPayments.map((p) => (
+            <div key={p.id} style={{ ...saleCard, borderColor: '#bbf7d0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 13 }}>
+                  <strong>{p.customerName}</strong> paid{' '}
+                  <strong style={{ color: '#166534' }}>N${fmt(p.amount)}</strong>
+                </span>
+                <span style={{ fontSize: 12, color: '#57606a' }}>
+                  {new Date(p.createdAt).toLocaleDateString('en-NA')}
+                </span>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   )
 }
