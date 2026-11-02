@@ -1,5 +1,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
+import { supabase } from '../lib/supabase'
+import { saveSale } from '../lib/saveSale'
 
 //wav helper part (only so you can hear the recording)
 function makeWav(chunks) {
@@ -31,30 +33,39 @@ function makeWav(chunks) {
 }
 
 function MicTest() {
-  const chunksRef        = useRef([])
-  const silenceTimerRef  = useRef(null)
-  const autoStopRef      = useRef(null)              // 30-second auto-stop timer
-  const [stats, setStats] = useState({ chunks: 0, bytes: 0 })
-  const [audioUrl, setAudioUrl] = useState('')
+  const chunksRef       = useRef([])
+  const silenceTimerRef = useRef(null)
+  const autoStopRef     = useRef(null)
+
+  const [stats,       setStats]       = useState({ chunks: 0, bytes: 0 })
+  const [audioUrl,    setAudioUrl]    = useState('')
+
+  //typed input
+  const [typedText,   setTypedText]   = useState('')
 
   //transcript state
-  const [liveText,     setLiveText]     = useState('')    // partial text while recording
-  const [finalText,    setFinalText]    = useState('')    // finished transcript
-  const [noSpeech,     setNoSpeech]     = useState(false) // ← 5-s silence flag
-  const [parsedSale,   setParsedSale]   = useState(null)  // result from /api/agent/parse
-  const [parseError,   setParseError]   = useState('')
-  const [parsing,      setParsing]      = useState(false)
-  const [parseSource,  setParseSource]  = useState('')    // 'mock' or 'meta'
+  const [liveText,    setLiveText]    = useState('')
+  const [finalText,   setFinalText]   = useState('')
+  const [noSpeech,    setNoSpeech]    = useState(false)
 
-  //chunk part — same as before
+  //parse state
+  const [parsedSale,  setParsedSale]  = useState(null)
+  const [parseError,  setParseError]  = useState('')
+  const [parsing,     setParsing]     = useState(false)
+  const [parseSource, setParseSource] = useState('')
+
+  //save state
+  const [saving,      setSaving]      = useState(false)
+  const [saveMsg,     setSaveMsg]     = useState('')
+
+  //chunk callback
   const handleChunk = useCallback((buffer) => {
     chunksRef.current.push(buffer)
     setStats((s) => ({ chunks: s.chunks + 1, bytes: s.bytes + buffer.byteLength }))
   }, [])
 
-  //transcript messages from the server WebSocket
+  //transcript messages from the server WS
   const handleTranscript = useCallback((msg) => {
-    //any message from the server means the pipeline is alive — cancel silence timer
     clearTimeout(silenceTimerRef.current)
     setNoSpeech(false)
     if (msg.type === 'partial') {
@@ -69,7 +80,15 @@ function MicTest() {
 
   const { isRecording, error, wsStatus, start, stop } = useVoiceRecorder(handleChunk, handleTranscript)
 
-  //begin part
+  //reset parse + save state
+  function resetResult() {
+    setParsedSale(null)
+    setParseError('')
+    setParseSource('')
+    setSaveMsg('')
+  }
+
+  //begin recording
   async function begin() {
     chunksRef.current = []
     clearTimeout(silenceTimerRef.current)
@@ -79,50 +98,37 @@ function MicTest() {
     setLiveText('')
     setFinalText('')
     setNoSpeech(false)
-    setParsedSale(null)
-    setParseError('')
-    setParseSource('')
+    resetResult()
     await start()
-    //auto-stop after 30 seconds so Meta never times out
     autoStopRef.current = setTimeout(() => finish(), 30000)
   }
 
-  //finish part — stop recording, build WAV preview, start silence timer
+  //stop recording
   async function finish() {
     clearTimeout(autoStopRef.current)
     stop()
     setTimeout(() => {
       setAudioUrl(URL.createObjectURL(makeWav(chunksRef.current)))
     }, 400)
-    //5-second timer: if no transcript arrives after stopping, show the fallback message
-    silenceTimerRef.current = setTimeout(() => {
-      setNoSpeech(true)
-    }, 5000)
+    silenceTimerRef.current = setTimeout(() => setNoSpeech(true), 5000)
   }
 
-  //parse part — called when user clicks "Parse sale"
+  //shared parse function — used by both voice and typed input
   async function parseSale(text) {
     if (!text) return
     setParsing(true)
-    setParseError('')
-    setParsedSale(null)
-    setParseSource('')
+    resetResult()
     try {
       const res = await fetch('/api/agent/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcript: text }),
       })
-      //always read JSON first — server always returns JSON even on errors
       let data
-      try {
-        data = await res.json()
-      } catch {
-        throw new Error(`Server returned non-JSON (status ${res.status})`)
-      }
+      try { data = await res.json() }
+      catch { throw new Error(`Server returned non-JSON (status ${res.status})`) }
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
       setParseSource(data.source || '')
-      //if no actions found, surface the clarifying question instead of raw JSON
       if (!data.actions?.length && data.clarifying_question) {
         setParseError(data.clarifying_question)
       } else {
@@ -135,21 +141,55 @@ function MicTest() {
     }
   }
 
+  //confirm and save to Supabase
+  async function confirmSave() {
+    if (!parsedSale) return
+    setSaving(true)
+    setSaveMsg('')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not signed in')
+      await saveSale(parsedSale, user.id)
+      setSaveMsg('✓ Saved')
+    } catch (err) {
+      setSaveMsg('Save failed: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const seconds = (stats.bytes / 2 / 24000).toFixed(1)
   const displayText = finalText || liveText
+  const hasSale = parsedSale?.actions?.some((a) => a.type === 'record_sale')
 
-  //colour-code the WebSocket status badge
   const wsStatusColor = {
-    idle:       '#888',
-    connecting: '#b45309',
-    connected:  '#166534',
-    closed:     '#555',
-    error:      '#dc2626',
+    idle: '#888', connecting: '#b45309', connected: '#166534',
+    closed: '#555', error: '#dc2626',
   }[wsStatus] ?? '#888'
 
   return (
     <div style={{ border: '1px solid #ccc', padding: 16, marginTop: 16, maxWidth: 480, fontFamily: 'sans-serif' }}>
       <h3 style={{ marginTop: 0 }}>Voice recorder</h3>
+
+      {/* typed input */}
+      <p style={{ margin: '0 0 4px', fontSize: 12, color: '#57606a' }}>Or type a sale:</p>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        <input
+          value={typedText}
+          onChange={(e) => setTypedText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') parseSale(typedText) }}
+          placeholder="e.g. Sold 2 bags of sugar to Alice, paid 150"
+          style={{ flex: 1, padding: '6px 8px', fontSize: 13, borderRadius: 5,
+                   border: '1px solid #d1d5db' }}
+        />
+        <button
+          onClick={() => parseSale(typedText)}
+          disabled={parsing || !typedText.trim()}
+          style={btnStyle('#16a34a')}
+        >
+          {parsing ? 'Parsing…' : 'Parse'}
+        </button>
+      </div>
 
       {/* record button */}
       {!isRecording ? (
@@ -158,7 +198,7 @@ function MicTest() {
         <button onClick={finish} style={btnStyle('#dc2626')}>⏹ Stop recording</button>
       )}
 
-      {/* ws status line — requirement 1 */}
+      {/* ws status */}
       <p style={{ margin: '6px 0 2px', fontSize: 12, color: wsStatusColor }}>
         Transcription: <strong>{wsStatus}</strong>
       </p>
@@ -168,10 +208,9 @@ function MicTest() {
         Chunks: {stats.chunks} | Audio: {seconds} s
       </p>
 
-      {/* errors */}
       {error && <p style={{ color: 'red', margin: '4px 0' }}>{error}</p>}
 
-      {/* silence fallback — requirement 4 */}
+      {/* silence fallback */}
       {noSpeech && !displayText && (
         <p style={{ color: '#92400e', background: '#fef3c7', border: '1px solid #fcd34d',
                     borderRadius: 6, padding: '8px 12px', margin: '8px 0', fontSize: 13 }}>
@@ -179,7 +218,7 @@ function MicTest() {
         </p>
       )}
 
-      {/* live transcript box */}
+      {/* live transcript */}
       {(isRecording || displayText) && (
         <div style={boxStyle}>
           <strong style={{ fontSize: 12, color: '#555' }}>
@@ -191,7 +230,7 @@ function MicTest() {
         </div>
       )}
 
-      {/* parse button */}
+      {/* parse button (voice path) */}
       {finalText && !parsedSale && (
         <button
           onClick={() => parseSale(finalText)}
@@ -203,7 +242,7 @@ function MicTest() {
       )}
 
       {/* parse error */}
-      {parseError && <p style={{ color: 'red', margin: '6px 0' }}>{parseError}</p>}
+      {parseError && <p style={{ color: '#b45309', margin: '6px 0' }}>{parseError}</p>}
 
       {/* parsed result */}
       {parsedSale && (
@@ -212,9 +251,7 @@ function MicTest() {
             PARSED SALE
             {parseSource && (
               <span style={{
-                marginLeft: 8,
-                padding: '1px 6px',
-                borderRadius: 4,
+                marginLeft: 8, padding: '1px 6px', borderRadius: 4,
                 background: parseSource === 'meta' ? '#dcfce7' : '#fef9c3',
                 color: parseSource === 'meta' ? '#166534' : '#854d0e',
                 fontWeight: 'normal',
@@ -236,6 +273,27 @@ function MicTest() {
         </p>
       )}
 
+      {/* confirm + save — only shown when there is an actual sale */}
+      {hasSale && !saveMsg && (
+        <button
+          onClick={confirmSave}
+          disabled={saving}
+          style={{ ...btnStyle('#1d4ed8'), marginTop: 10 }}
+        >
+          {saving ? 'Saving…' : '💾 Confirm and save'}
+        </button>
+      )}
+
+      {/* save result */}
+      {saveMsg && (
+        <p style={{
+          margin: '8px 0 0', fontWeight: 600,
+          color: saveMsg.startsWith('✓') ? '#166534' : '#dc2626',
+        }}>
+          {saveMsg}
+        </p>
+      )}
+
       {/* playback */}
       {audioUrl && (
         <div style={{ marginTop: 12 }}>
@@ -248,21 +306,13 @@ function MicTest() {
 }
 
 const btnStyle = (bg) => ({
-  background: bg,
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  padding: '8px 16px',
-  cursor: 'pointer',
-  fontSize: 14,
+  background: bg, color: '#fff', border: 'none',
+  borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 14,
 })
 
 const boxStyle = {
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
-  borderRadius: 6,
-  padding: '10px 12px',
-  marginTop: 10,
+  background: '#f8fafc', border: '1px solid #e2e8f0',
+  borderRadius: 6, padding: '10px 12px', marginTop: 10,
 }
 
 export default MicTest

@@ -82,7 +82,29 @@ create policy "own reminders" on reminders for all
 create policy "own voice logs" on voice_logs for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
--- items belong to the user through their transaction
-create policy "own items" on transaction_items for all
-  using (exists (select 1 from transactions t where t.id = transaction_id and t.user_id = auth.uid()))
-  with check (exists (select 1 from transactions t where t.id = transaction_id and t.user_id = auth.uid()));
+-- items: split into select and insert policies so inserts work reliably.
+-- The "for all" form's with check runs on insert before the row exists in the
+-- parent table in some Postgres planner paths; separate policies are safer.
+create policy "own items select" on transaction_items for select
+  using (exists (
+    select 1 from transactions t
+    where t.id = transaction_id and t.user_id = auth.uid()
+  ));
+
+create policy "own items insert" on transaction_items for insert
+  with check (exists (
+    select 1 from transactions t
+    where t.id = transaction_id and t.user_id = auth.uid()
+  ));
+
+create policy "own items update" on transaction_items for update
+  using (exists (
+    select 1 from transactions t
+    where t.id = transaction_id and t.user_id = auth.uid()
+  ));
+
+create policy "own items delete" on transaction_items for delete
+  using (exists (
+    select 1 from transactions t
+    where t.id = transaction_id and t.user_id = auth.uid()
+  ));
