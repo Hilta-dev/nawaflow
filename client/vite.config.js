@@ -3,6 +3,15 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  //proxy part
-  server: { proxy: { '/api': 'http://localhost:3001' } },
+  server: {
+    proxy: {
+      //http routes
+      '/api': 'http://localhost:3001',
+      //websocket route
+      '/ws': {
+        target: 'ws://localhost:3001',
+        ws: true,
+      },
+    },
+  },
 })
