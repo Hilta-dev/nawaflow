@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
-import { saveSale } from '../lib/saveSale'
+import { saveSale, savePayment } from '../lib/saveSale'
 
 //wav helper part (only so you can hear the recording)
 function makeWav(chunks) {
@@ -141,7 +141,7 @@ function MicTest() {
     }
   }
 
-  //confirm and save to Supabase
+  //confirm and save to Supabase — routes to sale or payment handler
   async function confirmSave() {
     if (!parsedSale) return
     setSaving(true)
@@ -149,7 +149,8 @@ function MicTest() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not signed in')
-      await saveSale(parsedSale, user.id)
+      if (hasSale)    await saveSale(parsedSale, user.id)
+      if (hasPayment) await savePayment(parsedSale, user.id)
       setSaveMsg('✓ Saved')
     } catch (err) {
       setSaveMsg('Save failed: ' + err.message)
@@ -159,8 +160,11 @@ function MicTest() {
   }
 
   const seconds = (stats.bytes / 2 / 24000).toFixed(1)
-  const displayText = finalText || liveText
-  const hasSale = parsedSale?.actions?.some((a) => a.type === 'record_sale')
+  const displayText  = finalText || liveText
+  const hasSale      = parsedSale?.actions?.some((a) => a.type === 'record_sale')
+  const hasPayment   = parsedSale?.actions?.some((a) => a.type === 'record_payment')
+  const paymentAction = parsedSale?.actions?.find((a) => a.type === 'record_payment')
+  const saleAction    = parsedSale?.actions?.find((a) => a.type === 'record_sale')
 
   const wsStatusColor = {
     idle: '#888', connecting: '#b45309', connected: '#166534',
@@ -244,25 +248,38 @@ function MicTest() {
       {/* parse error */}
       {parseError && <p style={{ color: '#b45309', margin: '6px 0' }}>{parseError}</p>}
 
-      {/* parsed result */}
-      {parsedSale && (
+      {/* parsed sale result */}
+      {hasSale && (
         <div style={boxStyle}>
-          <strong style={{ fontSize: 12, color: '#555' }}>
-            PARSED SALE
-            {parseSource && (
-              <span style={{
-                marginLeft: 8, padding: '1px 6px', borderRadius: 4,
-                background: parseSource === 'meta' ? '#dcfce7' : '#fef9c3',
-                color: parseSource === 'meta' ? '#166534' : '#854d0e',
-                fontWeight: 'normal',
-              }}>
-                {parseSource === 'meta' ? '✓ Meta AI' : '⚡ mock'}
+          <SourceBadge label="PARSED SALE" source={parseSource} />
+          <p style={{ margin: '6px 0 0', fontSize: 13 }}>
+            <strong>{saleAction.customer || 'Unknown'}</strong>
+            {' — '}
+            {(saleAction.items ?? []).map((it) => {
+              const unit = it.unit ? ` ${it.unit} of` : ''
+              return `${it.qty}${unit} ${it.product}`
+            }).join(', ') || 'no items'}
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+            Total: <strong>N${saleAction.total ?? 0}</strong>
+            {' · '}Paid: <strong>N${saleAction.paid ?? 0}</strong>
+            {(saleAction.total - saleAction.paid) > 0 && (
+              <span style={{ color: '#dc2626', marginLeft: 6 }}>
+                Owes N${saleAction.total - saleAction.paid}
               </span>
             )}
-          </strong>
-          <pre style={{ margin: '6px 0 0', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {JSON.stringify(parsedSale, null, 2)}
-          </pre>
+          </p>
+        </div>
+      )}
+
+      {/* parsed payment result */}
+      {hasPayment && (
+        <div style={{ ...boxStyle, borderColor: '#bbf7d0' }}>
+          <SourceBadge label="PARSED PAYMENT" source={parseSource} />
+          <p style={{ margin: '6px 0 0', fontSize: 13 }}>
+            <strong>{paymentAction.customer}</strong> paid{' '}
+            <strong>N${paymentAction.amount}</strong>
+          </p>
         </div>
       )}
 
@@ -273,8 +290,8 @@ function MicTest() {
         </p>
       )}
 
-      {/* confirm + save — only shown when there is an actual sale */}
-      {hasSale && !saveMsg && (
+      {/* confirm + save — shown for sale or payment */}
+      {(hasSale || hasPayment) && !saveMsg && (
         <button
           onClick={confirmSave}
           disabled={saving}
@@ -302,6 +319,24 @@ function MicTest() {
         </div>
       )}
     </div>
+  )
+}
+
+function SourceBadge({ label, source }) {
+  return (
+    <strong style={{ fontSize: 12, color: '#555' }}>
+      {label}
+      {source && (
+        <span style={{
+          marginLeft: 8, padding: '1px 6px', borderRadius: 4,
+          background: source === 'meta' ? '#dcfce7' : '#fef9c3',
+          color: source === 'meta' ? '#166534' : '#854d0e',
+          fontWeight: 'normal',
+        }}>
+          {source === 'meta' ? '✓ Meta AI' : '⚡ mock'}
+        </span>
+      )}
+    </strong>
   )
 }
 
