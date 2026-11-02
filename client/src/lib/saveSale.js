@@ -78,10 +78,13 @@ export async function saveSale(parsedSale, userId) {
   }
 
   // 4. update customers.balance_owed — add the unpaid portion of this sale
+  // Must include .eq('user_id', userId) or the RLS `using` clause silently
+  // filters out the row and the update applies to zero rows without an error.
   const { error: balErr } = await supabase
     .from('customers')
     .update({ balance_owed: currentBalance + unpaid })
     .eq('id', customerId)
+    .eq('user_id', userId)
 
   if (balErr) throw new Error('Balance update failed: ' + balErr.message)
 
@@ -140,6 +143,7 @@ export async function savePayment(parsedSale, userId) {
     .from('customers')
     .update({ balance_owed: newBalance })
     .eq('id', customer.id)
+    .eq('user_id', userId)
 
   if (balErr) throw new Error('Balance update failed: ' + balErr.message)
 
