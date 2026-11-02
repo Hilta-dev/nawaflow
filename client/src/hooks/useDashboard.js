@@ -47,7 +47,7 @@ export function useDashboard(userId) {
             total,
             paid,
             customers ( name ),
-            transaction_items ( qty, unit_price )
+            transaction_items ( qty, unit_price, product_name, unit )
           `)
           .eq('user_id', userId)
           .eq('type', 'sale')

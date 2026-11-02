@@ -80,7 +80,12 @@ function Dashboard({ userId, onRefresh }) {
             </div>
             <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
               {s.items.length > 0
-                ? s.items.map((it, i) => `${it.qty} item${it.qty !== 1 ? 's' : ''}`).join(', ')
+                ? s.items.map((it) => {
+                    const qty  = it.qty ?? '?'
+                    const name = it.product_name ?? 'item'
+                    const unit = it.unit ? ` ${it.unit} of` : ''
+                    return `${qty}${unit} ${name}`
+                  }).join(', ')
                 : 'No item detail'}
             </div>
             <div style={{ marginTop: 4, fontSize: 13 }}>

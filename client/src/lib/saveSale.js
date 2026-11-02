@@ -55,11 +55,13 @@ export async function saveSale(parsedSale, userId) {
 
   if (txnErr) throw new Error('Transaction insert failed: ' + txnErr.message)
 
-  // 3. insert line items (product_id left null — products aren't matched yet)
+  // 3. insert line items — save the free-text name and unit from the parse
   const items = (action.items ?? []).map((item) => ({
     transaction_id: txn.id,
     product_id:     null,
-    qty:            item.qty ?? 0,
+    product_name:   item.product ?? null,
+    unit:           item.unit    ?? null,
+    qty:            item.qty     ?? 0,
     unit_price:     null,
   }))
 

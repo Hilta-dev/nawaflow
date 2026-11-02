@@ -37,6 +37,8 @@ create table transaction_items (
   id uuid primary key default gen_random_uuid(),
   transaction_id uuid not null references transactions(id) on delete cascade,
   product_id uuid references products(id) on delete set null,
+  product_name text,   -- free-text name from the voice parse, no FK required
+  unit text,           -- e.g. "bags", "bottles", "kg"
   qty numeric(12,2) not null,
   unit_price numeric(12,2)
 );
