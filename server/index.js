@@ -21,12 +21,16 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', app: 'NawaFlow' });
 });
 app.use('/api/agent', agentRoutes);
+//catch unknown /api/* paths before the SPA fallback
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Unknown API route: ${req.method} ${req.path}` });
+});
 
 //serve the built React app so one process handles everything
 const distDir = join(__dirname, '../client/dist');
 app.use(express.static(distDir));
-//SPA fallback: any non-API path returns index.html
-app.get('*', (req, res) => {
+//SPA fallback — Express 5 requires a named wildcard, not bare '*'
+app.get('/{*splat}', (req, res) => {
   res.sendFile(join(distDir, 'index.html'));
 });
 
