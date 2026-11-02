@@ -1,0 +1,9 @@
+{
+  "name": "nawaflow",
+  "version": "1.0.0",
+  "description": "Voice-first bookkeeping assistant for small traders",
+  "scripts": {
+    "build": "cd client && npm install && npm run build",
+    "start": "cd server && npm install && node index.js"
+  }
+}
