@@ -3,6 +3,32 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
 import { saveSaleAction, savePaymentAction } from '../lib/saveSale'
 
+// ─── payment draft helpers ────────────────────────────────────────────────────
+
+// Given a record_payment action and a matched customer, build the paymentDraft.
+// amount_mode: "exact" → use action.amount; "all" → balance; "half" → balance/2
+function buildPaymentDraft(action, customer) {
+  const balance = Number(customer.balance_owed ?? 0)
+  let amount, amountLabel
+  if (action.amount_mode === 'all') {
+    amount = balance
+    amountLabel = 'full balance'
+  } else if (action.amount_mode === 'half') {
+    amount = Math.round(balance / 2 * 100) / 100
+    amountLabel = 'half of balance'
+  } else {
+    amount = Number(action.amount ?? 0)
+    amountLabel = ''
+  }
+  return {
+    customer:    customer.name,
+    customerId:  customer.id,
+    amount:      String(amount),
+    amountLabel,
+    balance,
+  }
+}
+
 //wav helper part (only so you can hear the recording)
 function makeWav(chunks) {
   const total = chunks.reduce((n, c) => n + c.byteLength, 0)
@@ -243,6 +269,8 @@ function MicTest({ session }) {
     setValidationMsg('')
     setDraft(null)
     setClarifyingDismissed(false)
+    setPaymentDraft(null)
+    setCustomerMatches(null)
   }
 
   //begin recording
@@ -292,10 +320,29 @@ function MicTest({ session }) {
       if (saleAction || payAction) {
         setParsedSale(data)
         if (saleAction) setDraft(initDraft(saleAction))
+        if (payAction) {
+          // match the parsed customer name against known customers
+          const matches = matchCustomers(payAction.customer, myCustomers)
+          if (matches.length === 0) {
+            // no match — show friendly error, block save
+            setParseError(`I don't know a customer called "${payAction.customer}". Check the name and try again.`)
+            // clear the payment part of parsedSale so the save button doesn't appear
+            setParsedSale({ ...data, actions: saleAction ? [saleAction] : [] })
+          } else if (matches.length === 1) {
+            setPaymentDraft(buildPaymentDraft(payAction, matches[0]))
+          } else {
+            // multiple matches — let user pick
+            setCustomerMatches(matches.map((c) => ({ ...c, _payAction: payAction })))
+          }
+        }
       } else if (data.clarifying_question) {
         setParseError(data.clarifying_question)
       } else {
-        setParseError("Couldn't understand that sale. Please try rephrasing.")
+        setParseError(
+          "I didn't quite catch that. Try something like:\n" +
+          '  "Sold 2 bags of sugar to Alice, paid 50"\n' +
+          '  "John paid 20 dollars"'
+        )
       }
     } catch (err) {
       setParseError(err.message)
@@ -336,7 +383,7 @@ function MicTest({ session }) {
   // ── save ──────────────────────────────────────────────────────────────────
 
   async function confirmSave() {
-    if (!parsedSale) return
+    if (!parsedSale && !paymentDraft) return
 
     if (draft) {
       if (parsedSale.clarifying_question && !clarifyingDismissed) {
@@ -357,6 +404,14 @@ function MicTest({ session }) {
           )
           return
         }
+      }
+    }
+
+    if (paymentDraft) {
+      const amt = Number(paymentDraft.amount)
+      if (!amt || amt <= 0) {
+        setValidationMsg('Payment amount must be greater than zero.')
+        return
       }
     }
 
@@ -383,12 +438,17 @@ function MicTest({ session }) {
         await saveSaleAction(editedAction, user.id)
       }
 
-      const hasPayment = parsedSale?.actions?.some((a) => a.type === 'record_payment')
-      if (hasPayment) await savePayment(parsedSale, user.id)
+      if (paymentDraft) {
+        await savePaymentAction(
+          { customer: paymentDraft.customer, amount: Number(paymentDraft.amount) },
+          user.id
+        )
+      }
 
       setSaveMsg('✓ Saved')
       setParsedSale(null)
       setDraft(null)
+      setPaymentDraft(null)
     } catch (err) {
       setSaveMsg('Save failed: ' + err.message)
     } finally {
@@ -398,15 +458,14 @@ function MicTest({ session }) {
 
   // ── derived ───────────────────────────────────────────────────────────────
 
-  const displayText         = finalText || liveText
-  const hasSale             = parsedSale?.actions?.some((a) => a.type === 'record_sale')
-  const hasPayment          = parsedSale?.actions?.some((a) => a.type === 'record_payment')
-  const paymentAction       = parsedSale?.actions?.find((a) => a.type === 'record_payment')
+  const displayText           = finalText || liveText
+  const hasSale               = parsedSale?.actions?.some((a) => a.type === 'record_sale')
 
-  const nameBlocked         = draft &&
+  const nameBlocked           = draft &&
     (!draft.customer.trim() || draft.customer.trim().toLowerCase() === 'unknown')
   const hasClarifyingQuestion = !!parsedSale?.clarifying_question && !clarifyingDismissed
-  const confirmDisabled     = saving || nameBlocked || hasClarifyingQuestion
+  const confirmDisabled       = saving || nameBlocked || hasClarifyingQuestion ||
+    (paymentDraft && (!Number(paymentDraft.amount) || Number(paymentDraft.amount) <= 0))
 
   const fmtCurrency = (n) => `N$${Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -455,7 +514,7 @@ function MicTest({ session }) {
           disabled={parsing || !typedText.trim()}
           style={{ ...btnStyle('#16a34a'), minWidth: 72, minHeight: 44 }}
         >
-          {parsing ? 'Parsing…' : 'Parse'}
+          {parsing ? 'Reviewing…' : 'Review'}
         </button>
       </div>
 
@@ -478,19 +537,23 @@ function MicTest({ session }) {
         </p>
       )}
 
-      {/* parse button (voice path) */}
+      {/* review button (voice path) */}
       {finalText && !parsedSale && (
         <button
           onClick={() => parseSale(finalText)}
           disabled={parsing}
           style={{ ...btnStyle('#16a34a'), marginTop: 8, width: '100%', minHeight: 44 }}
         >
-          {parsing ? 'Parsing…' : '✓ Parse sale'}
+          {parsing ? 'Reviewing…' : '✓ Review'}
         </button>
       )}
 
       {/* parse error */}
-      {parseError && <p style={{ color: '#b45309', margin: '8px 0', fontSize: 13 }}>{parseError}</p>}
+      {parseError && (
+        <p style={{ color: '#b45309', margin: '8px 0', fontSize: 13, whiteSpace: 'pre-line' }}>
+          {parseError}
+        </p>
+      )}
 
       {/* ── editable sale card ── */}
       {hasSale && draft && (
@@ -602,14 +665,83 @@ function MicTest({ session }) {
         </div>
       )}
 
-      {/* parsed payment result (read-only) */}
-      {hasPayment && (
-        <div style={{ ...cardStyle, borderColor: '#bbf7d0' }}>
-          <SourceBadge label="PARSED PAYMENT" source={parseSource} />
-          <p style={{ margin: '6px 0 0', fontSize: 13 }}>
-            <strong>{paymentAction.customer}</strong> paid{' '}
-            <strong>N${paymentAction.amount}</strong>
+      {/* ── customer pick buttons (multiple fuzzy matches) ── */}
+      {customerMatches && (
+        <div style={{ ...cardStyle, borderColor: '#bfdbfe' }}>
+          <strong style={{ fontSize: 12, color: '#6b7280' }}>PAYMENT — CHOOSE CUSTOMER</strong>
+          <p style={{ margin: '6px 0 8px', fontSize: 13 }}>
+            Several customers match that name. Who did you mean?
           </p>
+          {customerMatches.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                setPaymentDraft(buildPaymentDraft(c._payAction, c))
+                setCustomerMatches(null)
+              }}
+              style={{ ...ghostSmallBtn, display: 'block', width: '100%',
+                       marginBottom: 6, textAlign: 'left' }}
+            >
+              <strong>{c.name}</strong>
+              <span style={{ marginLeft: 8, color: '#6b7280', fontSize: 12 }}>
+                owes N${Number(c.balance_owed).toFixed(2)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── payment review card ── */}
+      {paymentDraft && (
+        <div style={{ ...cardStyle, borderColor: '#bbf7d0' }}>
+          <SourceBadge label="PAYMENT REVIEW" source={parseSource} />
+
+          {/* zero balance notice */}
+          {paymentDraft.balance <= 0 ? (
+            <p style={{ margin: '8px 0 0', fontSize: 13, color: '#166534',
+                        background: '#dcfce7', border: '1px solid #bbf7d0',
+                        borderRadius: 6, padding: '6px 10px' }}>
+              {paymentDraft.customer} owes nothing right now.
+            </p>
+          ) : (
+            <>
+              <p style={{ margin: '8px 0 4px', fontSize: 13 }}>
+                <strong>{paymentDraft.customer}</strong>
+                <span style={{ marginLeft: 8, color: '#6b7280', fontSize: 12 }}>
+                  balance: N${paymentDraft.balance.toFixed(2)}
+                </span>
+              </p>
+
+              <label style={labelStyle}>
+                Amount paid (N$)
+                {paymentDraft.amountLabel && (
+                  <span style={{ marginLeft: 6, color: '#16a34a', fontWeight: 600 }}>
+                    — {paymentDraft.amountLabel}
+                  </span>
+                )}
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={paymentDraft.amount}
+                onChange={(e) => {
+                  setPaymentDraft((d) => ({ ...d, amount: e.target.value, amountLabel: '' }))
+                  setValidationMsg('')
+                }}
+                style={{ ...fieldStyle, marginBottom: 4 }}
+              />
+
+              {/* overpayment warning */}
+              {Number(paymentDraft.amount) > paymentDraft.balance && (
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#92400e',
+                            background: '#fef3c7', border: '1px solid #fcd34d',
+                            borderRadius: 6, padding: '5px 8px' }}>
+                  ⚠ This is more than the balance owed. Are you sure?
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -623,7 +755,7 @@ function MicTest({ session }) {
       )}
 
       {/* confirm + save */}
-      {(hasSale || hasPayment) && !saveMsg && (
+      {(hasSale || paymentDraft) && !saveMsg && (
         <button
           onClick={confirmSave}
           disabled={confirmDisabled}
