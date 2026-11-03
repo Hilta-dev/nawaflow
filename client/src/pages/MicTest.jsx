@@ -227,6 +227,8 @@ function MicTest({ session }) {
   const [saving,      setSaving]      = useState(false)
   const [saveMsg,     setSaveMsg]     = useState('')
   const [validationMsg, setValidationMsg] = useState('')
+  const [dupWarning,  setDupWarning]  = useState(false)
+  const forceSaveRef  = useRef(false)
 
   // ── load all customers once for matching ──────────────────────────────────
   const [myCustomers, setMyCustomers] = useState([])
@@ -271,6 +273,8 @@ function MicTest({ session }) {
     setClarifyingDismissed(false)
     setPaymentDraft(null)
     setCustomerMatches(null)
+    setDupWarning(false)
+    forceSaveRef.current = false
   }
 
   //begin recording
@@ -435,6 +439,42 @@ function MicTest({ session }) {
             unit:    it.unit,
           })),
         }
+
+        // Duplicate sale check: same customer, same total, same items in last 10 minutes
+        if (!forceSaveRef.current) {
+          const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+          const { data: recentSales } = await supabase
+            .from('transactions')
+            .select('id, total, customer_id, transaction_items(product_name, qty), customers!inner(name)')
+            .eq('user_id', user.id)
+            .eq('type', 'sale')
+            .eq('total', editedAction.total)
+            .gte('created_at', tenMinsAgo)
+            .ilike('customers.name', editedAction.customer)
+            .limit(5)
+
+          if (recentSales?.length > 0) {
+            const draftItemKeys = editedAction.items
+              .map((i) => `${i.product.toLowerCase()}:${i.qty}`)
+              .sort()
+              .join('|')
+            const isDup = recentSales.some((s) => {
+              const saleItemKeys = (s.transaction_items ?? [])
+                .map((i) => `${(i.product_name ?? '').toLowerCase()}:${i.qty}`)
+                .sort()
+                .join('|')
+              return saleItemKeys === draftItemKeys
+            })
+            if (isDup) {
+              setSaving(false)
+              setDupWarning(true)
+              forceSaveRef.current = false
+              return
+            }
+          }
+        }
+        forceSaveRef.current = false
+
         await saveSaleAction(editedAction, user.id)
       }
 
@@ -464,8 +504,11 @@ function MicTest({ session }) {
   const nameBlocked           = draft &&
     (!draft.customer.trim() || draft.customer.trim().toLowerCase() === 'unknown')
   const hasClarifyingQuestion = !!parsedSale?.clarifying_question && !clarifyingDismissed
+  const paymentOverpaid       = paymentDraft && paymentDraft.balance > 0 &&
+    Number(paymentDraft.amount) > paymentDraft.balance
   const confirmDisabled       = saving || nameBlocked || hasClarifyingQuestion ||
-    (paymentDraft && (!Number(paymentDraft.amount) || Number(paymentDraft.amount) <= 0))
+    (paymentDraft && (!Number(paymentDraft.amount) || Number(paymentDraft.amount) <= 0)) ||
+    paymentOverpaid
 
   const fmtCurrency = (n) => `N$${Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -732,13 +775,22 @@ function MicTest({ session }) {
                 style={{ ...fieldStyle, marginBottom: 4 }}
               />
 
-              {/* overpayment warning */}
+              {/* overpayment warning + fix button */}
               {Number(paymentDraft.amount) > paymentDraft.balance && (
-                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#92400e',
-                            background: '#fef3c7', border: '1px solid #fcd34d',
-                            borderRadius: 6, padding: '5px 8px' }}>
-                  ⚠ This is more than the balance owed. Are you sure?
-                </p>
+                <div style={{ margin: '4px 0 0', background: '#fef3c7',
+                              border: '1px solid #fcd34d', borderRadius: 6, padding: '7px 8px' }}>
+                  <p style={{ margin: '0 0 6px', fontSize: 12, color: '#92400e' }}>
+                    This is more than the balance owed. Please correct the amount.
+                  </p>
+                  <button
+                    onClick={() => setPaymentDraft((d) => ({
+                      ...d, amount: String(d.balance), amountLabel: 'full balance',
+                    }))}
+                    style={{ ...btnStyle('#92400e'), fontSize: 12, padding: '5px 10px', minHeight: 0 }}
+                  >
+                    Pay the full balance (N${paymentDraft.balance.toFixed(2)})
+                  </button>
+                </div>
               )}
             </>
           )}
@@ -754,8 +806,32 @@ function MicTest({ session }) {
         </p>
       )}
 
+      {/* duplicate sale warning */}
+      {dupWarning && (
+        <div style={{ marginTop: 12, background: '#fef3c7', border: '1px solid #fcd34d',
+                      borderRadius: 8, padding: '10px 12px' }}>
+          <p style={{ margin: '0 0 8px', fontSize: 13, color: '#92400e' }}>
+            You already saved this sale a moment ago. Save it again?
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => { forceSaveRef.current = true; setDupWarning(false); confirmSave() }}
+              style={{ ...btnStyle('#16a34a'), minHeight: 44, flex: 1 }}
+            >
+              Save again
+            </button>
+            <button
+              onClick={resetResult}
+              style={{ ...btnStyle('#6b7280'), minHeight: 44, flex: 1 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* confirm + save */}
-      {(hasSale || paymentDraft) && !saveMsg && (
+      {(hasSale || paymentDraft) && !saveMsg && !dupWarning && (
         <button
           onClick={confirmSave}
           disabled={confirmDisabled}
@@ -769,6 +845,16 @@ function MicTest({ session }) {
           }}
         >
           {saving ? 'Saving…' : '💾 Confirm and save'}
+        </button>
+      )}
+
+      {/* cancel */}
+      {(hasSale || paymentDraft) && !saveMsg && !dupWarning && (
+        <button
+          onClick={resetResult}
+          style={{ ...btnStyle('#6b7280'), marginTop: 8, width: '100%', minHeight: 44 }}
+        >
+          Cancel
         </button>
       )}
 

@@ -215,6 +215,14 @@ export async function savePaymentAction(action, userId) {
   if (findErr)   throw new Error('Customer lookup failed: ' + findErr.message)
   if (!customer) throw new Error(`Customer "${customerName}" not found. Check the name and try again.`)
 
+  // Safety net: never allow saving more than the customer's current balance
+  const currentBalance = Number(customer.balance_owed ?? 0)
+  if (amount > currentBalance) {
+    throw new Error(
+      `Payment of N$${amount.toFixed(2)} is more than ${customerName}'s balance of N$${currentBalance.toFixed(2)}.`
+    )
+  }
+
   // 2. insert the payment transaction
   const { data: txn, error: txnErr } = await supabase
     .from('transactions')
