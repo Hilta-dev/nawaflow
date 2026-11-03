@@ -402,7 +402,10 @@ function MicTest({ session }) {
     if (!parsedSale && !paymentDraft) return
 
     if (draft) {
-      if (parsedSale.clarifying_question && !clarifyingDismissed) {
+      const stillNeedsAnswer = parsedSale.clarifying_question && !clarifyingDismissed &&
+        !(draft.customer.trim() && draft.customer.trim().toLowerCase() !== 'unknown' &&
+          Number(draft.total) > 0)
+      if (stillNeedsAnswer) {
         setValidationMsg('Please answer the question above before saving.')
         return
       }
