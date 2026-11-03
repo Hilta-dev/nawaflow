@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
 import { saveSaleAction, savePayment } from '../lib/saveSale'
@@ -73,14 +73,69 @@ function validateDraft(draft) {
   return ''
 }
 
+// ─── greeting helper ─────────────────────────────────────────────────────────
+
+function greeting() {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
-function MicTest() {
+function MicTest({ session }) {
   const chunksRef       = useRef([])
   const silenceTimerRef = useRef(null)
   const autoStopRef     = useRef(null)
 
-  const [stats,       setStats]       = useState({ chunks: 0, bytes: 0 })
+  const userId = session?.user?.id
+  const shopName = session?.user?.user_metadata?.shop_name || 'Nawa'
+
+  // ── mini stats ──────────────────────────────────────────────────────────────
+  const [todaySalesCount, setTodaySalesCount] = useState(0)
+  const [todayCollected,  setTodayCollected]  = useState(0)
+  const [totalOwed,       setTotalOwed]       = useState(0)
+
+  useEffect(() => {
+    if (!userId) return
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayISO = today.toISOString()
+
+    // today sales count
+    supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('type', 'sale')
+      .gte('created_at', todayISO)
+      .then(({ count }) => setTodaySalesCount(count ?? 0))
+
+    // today collected (sum of paid)
+    supabase
+      .from('transactions')
+      .select('paid')
+      .eq('user_id', userId)
+      .eq('type', 'sale')
+      .gte('created_at', todayISO)
+      .then(({ data }) => {
+        const sum = (data ?? []).reduce((s, r) => s + Number(r.paid ?? 0), 0)
+        setTodayCollected(sum)
+      })
+
+    // total owed across all customers
+    supabase
+      .from('customers')
+      .select('balance_owed')
+      .eq('user_id', userId)
+      .then(({ data }) => {
+        const sum = (data ?? []).reduce((s, r) => s + Number(r.balance_owed ?? 0), 0)
+        setTotalOwed(sum)
+      })
+  }, [userId])
+
+  // ── audio / recording state ──────────────────────────────────────────────────
   const [audioUrl,    setAudioUrl]    = useState('')
 
   //typed input
@@ -98,8 +153,7 @@ function MicTest() {
   const [parseSource, setParseSource] = useState('')
 
   //editable draft for the sale card
-  const [draft,       setDraft]       = useState(null)   // null = no card shown
-  // true once the user has resolved the clarifying question by picking Walk-in or typing a real name
+  const [draft,       setDraft]       = useState(null)
   const [clarifyingDismissed, setClarifyingDismissed] = useState(false)
 
   //save state
@@ -110,7 +164,6 @@ function MicTest() {
   //chunk callback
   const handleChunk = useCallback((buffer) => {
     chunksRef.current.push(buffer)
-    setStats((s) => ({ chunks: s.chunks + 1, bytes: s.bytes + buffer.byteLength }))
   }, [])
 
   //transcript messages from the server WS
@@ -127,7 +180,7 @@ function MicTest() {
     }
   }, [])
 
-  const { isRecording, error, wsStatus, start, stop } = useVoiceRecorder(handleChunk, handleTranscript)
+  const { isRecording, error, start, stop } = useVoiceRecorder(handleChunk, handleTranscript)
 
   //reset parse + save state
   function resetResult() {
@@ -145,7 +198,6 @@ function MicTest() {
     chunksRef.current = []
     clearTimeout(silenceTimerRef.current)
     clearTimeout(autoStopRef.current)
-    setStats({ chunks: 0, bytes: 0 })
     setAudioUrl('')
     setLiveText('')
     setFinalText('')
@@ -186,14 +238,11 @@ function MicTest() {
       const payAction  = actions.find((a) => a.type === 'record_payment')
 
       if (saleAction || payAction) {
-        // we have at least one actionable result — show the review card
         setParsedSale(data)
         if (saleAction) setDraft(initDraft(saleAction))
       } else if (data.clarifying_question) {
-        // parser needs more info — show the question
         setParseError(data.clarifying_question)
       } else {
-        // no actions and no clarifying question — show a generic fallback
         setParseError("Couldn't understand that sale. Please try rephrasing.")
       }
     } catch (err) {
@@ -208,7 +257,6 @@ function MicTest() {
   function setDraftField(field, value) {
     setDraft((d) => ({ ...d, [field]: value }))
     setValidationMsg('')
-    // dismiss the clarifying question once the user types a real customer name
     if (field === 'customer') {
       const trimmed = value.trim().toLowerCase()
       if (trimmed && trimmed !== 'unknown') setClarifyingDismissed(true)
@@ -224,7 +272,6 @@ function MicTest() {
     setValidationMsg('')
   }
 
-  // set customer to Walk-in and force paid = total (no debt); dismiss any clarifying question
   function applyWalkIn() {
     setDraft((d) => {
       const total = d.total
@@ -239,9 +286,7 @@ function MicTest() {
   async function confirmSave() {
     if (!parsedSale) return
 
-    // run validation before touching Supabase
     if (draft) {
-      // block if parser returned a clarifying question that the user has not resolved
       if (parsedSale.clarifying_question && !clarifyingDismissed) {
         setValidationMsg('Please answer the question above before saving.')
         return
@@ -251,7 +296,6 @@ function MicTest() {
         setValidationMsg(vErr)
         return
       }
-      // Walk-in: paid must equal total (no debt allowed)
       if (draft.customer.trim().toLowerCase() === 'walk-in') {
         const total = Number(draft.total)
         const paid  = Number(draft.paid)
@@ -272,7 +316,6 @@ function MicTest() {
       if (!user) throw new Error('Not signed in')
 
       if (draft) {
-        // build the action from edited draft values and pass it directly
         const editedAction = {
           type:     'record_sale',
           customer: draft.customer.trim(),
@@ -291,7 +334,6 @@ function MicTest() {
       const hasPayment = parsedSale?.actions?.some((a) => a.type === 'record_payment')
       if (hasPayment) await savePayment(parsedSale, user.id)
 
-      // clear the review card and show success
       setSaveMsg('✓ Saved')
       setParsedSale(null)
       setDraft(null)
@@ -304,84 +346,84 @@ function MicTest() {
 
   // ── derived ───────────────────────────────────────────────────────────────
 
-  const seconds = (stats.bytes / 2 / 24000).toFixed(1)
-  const displayText   = finalText || liveText
-  const hasSale       = parsedSale?.actions?.some((a) => a.type === 'record_sale')
-  const hasPayment    = parsedSale?.actions?.some((a) => a.type === 'record_payment')
-  const paymentAction = parsedSale?.actions?.find((a) => a.type === 'record_payment')
+  const displayText         = finalText || liveText
+  const hasSale             = parsedSale?.actions?.some((a) => a.type === 'record_sale')
+  const hasPayment          = parsedSale?.actions?.some((a) => a.type === 'record_payment')
+  const paymentAction       = parsedSale?.actions?.find((a) => a.type === 'record_payment')
 
-  // confirm button is disabled when there is a clarifying question, or customer is empty/unknown
-  const nameBlocked = draft &&
+  const nameBlocked         = draft &&
     (!draft.customer.trim() || draft.customer.trim().toLowerCase() === 'unknown')
   const hasClarifyingQuestion = !!parsedSale?.clarifying_question && !clarifyingDismissed
-  const confirmDisabled = saving || nameBlocked || hasClarifyingQuestion
+  const confirmDisabled     = saving || nameBlocked || hasClarifyingQuestion
 
-  const wsStatusColor = {
-    idle: '#888', connecting: '#b45309', connected: '#166534',
-    closed: '#555', error: '#dc2626',
-  }[wsStatus] ?? '#888'
+  const fmtCurrency = (n) => `N$${Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
   return (
-    <div style={{ border: '1px solid #ccc', padding: 16, marginTop: 16, maxWidth: 480, fontFamily: 'sans-serif' }}>
-      <h3 style={{ marginTop: 0 }}>Voice recorder</h3>
+    <div style={{ padding: '16px 16px 8px' }}>
 
-      {/* typed input */}
-      <p style={{ margin: '0 0 4px', fontSize: 12, color: '#57606a' }}>Or type a sale:</p>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+      {/* ── greeting ── */}
+      <p style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700, color: '#1a1a1a' }}>
+        {greeting()}, {shopName}!
+      </p>
+
+      {/* ── mini stats row ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <MiniStat label="Today's sales" value={todaySalesCount} />
+        <MiniStat label="Collected"     value={fmtCurrency(todayCollected)} />
+        <MiniStat label="Owed"          value={fmtCurrency(totalOwed)} />
+      </div>
+
+      {/* ── large mic button ── */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
+        <button
+          onClick={isRecording ? finish : begin}
+          style={micBtnStyle(isRecording)}
+          aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+        >
+          {isRecording ? '⏹' : '🎙'}
+        </button>
+        <span style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+          {isRecording ? 'Tap to stop' : 'Tap to record'}
+        </span>
+      </div>
+
+      {/* ── type a sale ── */}
+      <p style={{ margin: '0 0 6px', fontSize: 13, color: '#6b7280' }}>or type a sale</p>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <input
           value={typedText}
           onChange={(e) => setTypedText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') parseSale(typedText) }}
           placeholder="e.g. Sold 2 bags of sugar to Alice, paid 150"
-          style={{ flex: 1, padding: '6px 8px', fontSize: 13, borderRadius: 5,
-                   border: '1px solid #d1d5db' }}
+          style={{ flex: 1, padding: '10px 12px', fontSize: 14, borderRadius: 8,
+                   border: '1px solid #d1d5db', minHeight: 44 }}
         />
         <button
           onClick={() => parseSale(typedText)}
           disabled={parsing || !typedText.trim()}
-          style={btnStyle('#16a34a')}
+          style={{ ...btnStyle('#16a34a'), minWidth: 72, minHeight: 44 }}
         >
           {parsing ? 'Parsing…' : 'Parse'}
         </button>
       </div>
 
-      {/* record button */}
-      {!isRecording ? (
-        <button onClick={begin} style={btnStyle('#2563eb')}>🎙 Start recording</button>
-      ) : (
-        <button onClick={finish} style={btnStyle('#dc2626')}>⏹ Stop recording</button>
+      {error && <p style={{ color: '#dc2626', margin: '4px 0', fontSize: 13 }}>{error}</p>}
+
+      {/* ── transcript box ── */}
+      {(isRecording || displayText) && (
+        <div style={boxStyle}>
+          <p style={{ margin: 0, fontSize: 14 }}>
+            {displayText || <span style={{ color: '#9ca3af' }}>Listening…</span>}
+          </p>
+        </div>
       )}
-
-      {/* ws status */}
-      <p style={{ margin: '6px 0 2px', fontSize: 12, color: wsStatusColor }}>
-        Transcription: <strong>{wsStatus}</strong>
-      </p>
-
-      {/* stats */}
-      <p style={{ margin: '2px 0 6px', color: '#555', fontSize: 13 }}>
-        Chunks: {stats.chunks} | Audio: {seconds} s
-      </p>
-
-      {error && <p style={{ color: 'red', margin: '4px 0' }}>{error}</p>}
 
       {/* silence fallback */}
       {noSpeech && !displayText && (
         <p style={{ color: '#92400e', background: '#fef3c7', border: '1px solid #fcd34d',
-                    borderRadius: 6, padding: '8px 12px', margin: '8px 0', fontSize: 13 }}>
+                    borderRadius: 8, padding: '8px 12px', margin: '8px 0', fontSize: 13 }}>
           No speech detected or no response from Meta. Check the server console logs.
         </p>
-      )}
-
-      {/* live transcript */}
-      {(isRecording || displayText) && (
-        <div style={boxStyle}>
-          <strong style={{ fontSize: 12, color: '#555' }}>
-            {isRecording && !finalText ? 'LIVE TRANSCRIPT' : 'TRANSCRIPT'}
-          </strong>
-          <p style={{ margin: '4px 0 0' }}>
-            {displayText || <span style={{ color: '#aaa' }}>Listening…</span>}
-          </p>
-        </div>
       )}
 
       {/* parse button (voice path) */}
@@ -389,25 +431,24 @@ function MicTest() {
         <button
           onClick={() => parseSale(finalText)}
           disabled={parsing}
-          style={{ ...btnStyle('#16a34a'), marginTop: 8 }}
+          style={{ ...btnStyle('#16a34a'), marginTop: 8, width: '100%', minHeight: 44 }}
         >
           {parsing ? 'Parsing…' : '✓ Parse sale'}
         </button>
       )}
 
       {/* parse error */}
-      {parseError && <p style={{ color: '#b45309', margin: '6px 0' }}>{parseError}</p>}
+      {parseError && <p style={{ color: '#b45309', margin: '8px 0', fontSize: 13 }}>{parseError}</p>}
 
       {/* ── editable sale card ── */}
       {hasSale && draft && (
-        <div style={boxStyle}>
+        <div style={cardStyle}>
           <SourceBadge label="SALE REVIEW" source={parseSource} />
 
-          {/* clarifying question — blocks save */}
           {hasClarifyingQuestion && (
             <p style={{ margin: '8px 0 4px', fontSize: 13,
                         color: '#92400e', background: '#fef3c7',
-                        border: '1px solid #fcd34d', borderRadius: 5,
+                        border: '1px solid #fcd34d', borderRadius: 6,
                         padding: '6px 10px' }}>
               ❓ {parsedSale.clarifying_question}
             </p>
@@ -509,9 +550,9 @@ function MicTest() {
         </div>
       )}
 
-      {/* parsed payment result (read-only, no editing needed) */}
+      {/* parsed payment result (read-only) */}
       {hasPayment && (
-        <div style={{ ...boxStyle, borderColor: '#bbf7d0' }}>
+        <div style={{ ...cardStyle, borderColor: '#bbf7d0' }}>
           <SourceBadge label="PARSED PAYMENT" source={parseSource} />
           <p style={{ margin: '6px 0 0', fontSize: 13 }}>
             <strong>{paymentAction.customer}</strong> paid{' '}
@@ -524,19 +565,21 @@ function MicTest() {
       {validationMsg && (
         <p style={{ margin: '8px 0 0', fontSize: 13, color: '#dc2626',
                     background: '#fef2f2', border: '1px solid #fca5a5',
-                    borderRadius: 5, padding: '6px 10px' }}>
+                    borderRadius: 6, padding: '8px 10px' }}>
           {validationMsg}
         </p>
       )}
 
-      {/* confirm + save — shown for sale or payment */}
+      {/* confirm + save */}
       {(hasSale || hasPayment) && !saveMsg && (
         <button
           onClick={confirmSave}
           disabled={confirmDisabled}
           style={{
-            ...btnStyle('#1d4ed8'),
-            marginTop: 10,
+            ...btnStyle('#16a34a'),
+            marginTop: 12,
+            width: '100%',
+            minHeight: 44,
             opacity: confirmDisabled ? 0.5 : 1,
             cursor: confirmDisabled ? 'not-allowed' : 'pointer',
           }}
@@ -548,7 +591,7 @@ function MicTest() {
       {/* save result */}
       {saveMsg && (
         <p style={{
-          margin: '8px 0 0', fontWeight: 600,
+          margin: '10px 0 0', fontWeight: 600, fontSize: 15,
           color: saveMsg.startsWith('✓') ? '#166534' : '#dc2626',
         }}>
           {saveMsg}
@@ -558,17 +601,25 @@ function MicTest() {
       {/* playback */}
       {audioUrl && (
         <div style={{ marginTop: 12 }}>
-          <strong style={{ fontSize: 12, color: '#555' }}>PLAYBACK</strong>
-          <audio controls src={audioUrl} style={{ display: 'block', marginTop: 4, width: '100%' }} />
+          <audio controls src={audioUrl} style={{ display: 'block', width: '100%' }} />
         </div>
       )}
     </div>
   )
 }
 
+function MiniStat({ label, value }) {
+  return (
+    <div style={miniStatStyle}>
+      <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: '#16a34a' }}>{value}</div>
+    </div>
+  )
+}
+
 function SourceBadge({ label, source }) {
   return (
-    <strong style={{ fontSize: 12, color: '#555' }}>
+    <strong style={{ fontSize: 12, color: '#6b7280' }}>
       {label}
       {source && (
         <span style={{
@@ -584,29 +635,71 @@ function SourceBadge({ label, source }) {
   )
 }
 
+// ── styles ────────────────────────────────────────────────────────────────────
+
+const micBtnStyle = (recording) => ({
+  width: 72,
+  height: 72,
+  borderRadius: '50%',
+  background: recording ? '#dc2626' : '#16a34a',
+  color: '#fff',
+  border: 'none',
+  fontSize: 28,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+  minWidth: 72,
+  minHeight: 72,
+})
+
+const miniStatStyle = {
+  flex: 1,
+  background: '#ffffff',
+  borderRadius: 12,
+  boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+  padding: '10px 8px',
+  textAlign: 'center',
+  minWidth: 0,
+}
+
 const btnStyle = (bg) => ({
   background: bg, color: '#fff', border: 'none',
-  borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 14,
+  borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 14,
 })
 
 const ghostSmallBtn = {
-  background: 'none', border: '1px solid #d1d5db', borderRadius: 5,
-  padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: '#374151',
-  whiteSpace: 'nowrap',
+  background: 'none', border: '1px solid #d1d5db', borderRadius: 6,
+  padding: '6px 10px', fontSize: 12, cursor: 'pointer', color: '#374151',
+  whiteSpace: 'nowrap', minHeight: 44,
+}
+
+const cardStyle = {
+  background: '#ffffff',
+  border: '1px solid #e5e7eb',
+  borderRadius: 12,
+  boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+  padding: '12px 14px',
+  marginTop: 12,
 }
 
 const boxStyle = {
-  background: '#f8fafc', border: '1px solid #e2e8f0',
-  borderRadius: 6, padding: '10px 12px', marginTop: 10,
+  background: '#f8fafc',
+  border: '1px solid #e2e8f0',
+  borderRadius: 8,
+  padding: '10px 12px',
+  marginTop: 10,
 }
 
 const fieldStyle = {
-  width: '100%', padding: '5px 8px', fontSize: 13,
-  border: '1px solid #d1d5db', borderRadius: 5, boxSizing: 'border-box',
+  width: '100%', padding: '8px 10px', fontSize: 14,
+  border: '1px solid #d1d5db', borderRadius: 6, boxSizing: 'border-box',
+  minHeight: 44,
 }
 
 const labelStyle = {
-  display: 'block', fontSize: 11, color: '#57606a', marginBottom: 2,
+  display: 'block', fontSize: 11, color: '#6b7280', marginBottom: 2,
 }
 
 export default MicTest

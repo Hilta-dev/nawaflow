@@ -90,6 +90,7 @@ function Login() {
   if (awaitingConfirm) {
     return (
       <div style={containerStyle}>
+        <div style={cardStyle}>
         <h1 style={h1Style}>Nawa</h1>
         <div style={infoBoxStyle}>
           <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Check your email</p>
@@ -116,6 +117,7 @@ function Login() {
             Log in
           </button>
         </p>
+        </div>
       </div>
     )
   }
@@ -125,8 +127,9 @@ function Login() {
 
   return (
     <div style={containerStyle}>
+      <div style={cardStyle}>
       <h1 style={h1Style}>Nawa</h1>
-      <p style={{ margin: '0 0 20px', color: '#57606a', fontSize: 14 }}>
+      <p style={{ margin: '0 0 20px', color: '#6b7280', fontSize: 13, textAlign: 'center' }}>
         Your voice. Your business. In control.
       </p>
 
@@ -184,6 +187,7 @@ function Login() {
           {isLogin ? 'Create account' : 'Log in'}
         </button>
       </p>
+      </div>
     </div>
   )
 }
@@ -191,20 +195,37 @@ function Login() {
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const containerStyle = {
-  padding: '32px 24px',
-  fontFamily: 'sans-serif',
-  maxWidth: 360,
+  minHeight: '100dvh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '24px 16px',
+  background: '#f0fdf4',
+}
+
+const cardStyle = {
+  background: '#ffffff',
+  borderRadius: 12,
+  boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+  padding: 32,
+  width: '100%',
+  maxWidth: 380,
 }
 
 const h1Style = {
   margin: '0 0 4px',
-  fontSize: 28,
+  fontSize: 32,
+  fontWeight: 700,
+  color: '#16a34a',
+  textAlign: 'center',
 }
 
 const h2Style = {
-  margin: '0 0 16px',
-  fontSize: 20,
+  margin: '0 0 20px',
+  fontSize: 18,
   fontWeight: 600,
+  textAlign: 'center',
+  color: '#1a1a1a',
 }
 
 const labelStyle = {
@@ -219,36 +240,39 @@ const inputStyle = {
   display: 'block',
   width: '100%',
   marginBottom: 16,
-  padding: '9px 10px',
-  fontSize: 14,
+  padding: '11px 12px',
+  fontSize: 15,
   border: '1px solid #d1d5db',
-  borderRadius: 6,
+  borderRadius: 8,
   boxSizing: 'border-box',
+  minHeight: 44,
 }
 
 const primaryBtnStyle = {
   display: 'block',
   width: '100%',
-  padding: '10px 0',
+  padding: '12px 0',
   fontSize: 15,
   fontWeight: 600,
-  background: '#2563eb',
+  background: '#16a34a',
   color: '#fff',
   border: 'none',
-  borderRadius: 6,
+  borderRadius: 8,
   cursor: 'pointer',
   marginTop: 4,
+  minHeight: 44,
 }
 
 const secondaryBtnStyle = {
   display: 'inline-block',
-  padding: '8px 16px',
+  padding: '10px 16px',
   fontSize: 14,
   background: 'none',
   border: '1px solid #d1d5db',
-  borderRadius: 6,
+  borderRadius: 8,
   cursor: 'pointer',
   color: '#374151',
+  minHeight: 44,
 }
 
 const showHideBtnStyle = {
@@ -259,15 +283,16 @@ const showHideBtnStyle = {
   background: 'none',
   border: 'none',
   fontSize: 12,
-  color: '#2563eb',
+  color: '#16a34a',
   cursor: 'pointer',
   padding: '2px 4px',
+  minHeight: 44,
 }
 
 const linkBtnStyle = {
   background: 'none',
   border: 'none',
-  color: '#2563eb',
+  color: '#16a34a',
   cursor: 'pointer',
   fontSize: 'inherit',
   padding: 0,
@@ -277,7 +302,8 @@ const linkBtnStyle = {
 const switchStyle = {
   marginTop: 16,
   fontSize: 13,
-  color: '#57606a',
+  color: '#6b7280',
+  textAlign: 'center',
 }
 
 const errorStyle = {
@@ -286,14 +312,14 @@ const errorStyle = {
   color: '#dc2626',
   background: '#fef2f2',
   border: '1px solid #fca5a5',
-  borderRadius: 5,
-  padding: '7px 10px',
+  borderRadius: 8,
+  padding: '8px 12px',
 }
 
 const infoBoxStyle = {
-  background: '#eff6ff',
-  border: '1px solid #bfdbfe',
-  borderRadius: 6,
+  background: '#f0fdf4',
+  border: '1px solid #bbf7d0',
+  borderRadius: 8,
   padding: '12px 14px',
 }
 

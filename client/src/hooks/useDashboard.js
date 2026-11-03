@@ -78,7 +78,7 @@ export function useDashboard(userId) {
       // Totals — all from customers.balance_owed, not from transactions arithmetic
       const totalSales    = salesCountRes.count ?? 0
       const totalOwed     = customers.reduce((sum, c) => sum + Number(c.balance_owed ?? 0), 0)
-      const customerCount = customers.length
+      const customerCount = customers.filter(c => c.name?.toLowerCase() !== 'walk-in').length
 
       // Debtors: balance_owed > 0, biggest first
       const debtors = customers

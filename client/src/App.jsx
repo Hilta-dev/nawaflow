@@ -7,10 +7,10 @@ import Dashboard from './pages/Dashboard'
 function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [tab,     setTab]     = useState('recorder') // 'recorder' | 'dashboard'
-  const [refresh, setRefresh] = useState(0)          // bump to tell Dashboard to reload
+  const [tab,     setTab]     = useState('home')   // 'home' | 'dashboard'
+  const [refresh, setRefresh] = useState(0)         // bump to tell Dashboard to reload
+  const [menuOpen, setMenuOpen] = useState(false)
 
-  //session part
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -22,78 +22,174 @@ function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  if (loading) return <p style={{ padding: 24, fontFamily: 'sans-serif' }}>Loading…</p>
+  if (loading) return <p style={{ padding: 24 }}>Loading…</p>
   if (!session) return <Login />
 
-  const userId = session.user.id
+  const email    = session.user.email ?? ''
+  const initial  = email.charAt(0).toUpperCase()
+  const userId   = session.user.id
 
   return (
-    <div style={{ padding: '16px 24px 32px', fontFamily: 'sans-serif', maxWidth: 520 }}>
-      {/* header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Nawa</h1>
-        <button
-          onClick={() => supabase.auth.signOut()}
-          style={ghostBtn}
-        >
-          Sign out
-        </button>
-      </div>
-      <p style={{ margin: '0 0 16px', fontSize: 12, color: '#57606a' }}>
-        {session.user.email}
-      </p>
+    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
 
-      {/* tab bar */}
-      <div style={tabBar}>
+      {/* ── header ── */}
+      <header style={headerStyle}>
+        <span style={logoStyle}>Nawa</span>
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            style={avatarBtn}
+            aria-label="Account menu"
+          >
+            {initial}
+          </button>
+
+          {menuOpen && (
+            <>
+              {/* backdrop to close on outside click */}
+              <div
+                onClick={() => setMenuOpen(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 9 }}
+              />
+              <div style={dropdownStyle}>
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6b7280', wordBreak: 'break-all' }}>
+                  {email}
+                </p>
+                <button
+                  onClick={() => supabase.auth.signOut()}
+                  style={signOutBtn}
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* ── page content ── */}
+      <main style={{ flex: 1, paddingBottom: 72 }}>
+        {tab === 'home' && (
+          <MicTest session={session} />
+        )}
+        {tab === 'dashboard' && (
+          <Dashboard
+            userId={userId}
+            session={session}
+            key={refresh}
+          />
+        )}
+      </main>
+
+      {/* ── bottom nav ── */}
+      <nav style={navBar}>
         <button
-          onClick={() => setTab('recorder')}
-          style={tabBtn(tab === 'recorder')}
+          onClick={() => setTab('home')}
+          style={navBtn(tab === 'home')}
         >
-          🎙 Recorder
+          <span style={{ fontSize: 20 }}>🏠</span>
+          <span>Home</span>
         </button>
         <button
           onClick={() => { setTab('dashboard'); setRefresh((n) => n + 1) }}
-          style={tabBtn(tab === 'dashboard')}
+          style={navBtn(tab === 'dashboard')}
         >
-          📊 Dashboard
+          <span style={{ fontSize: 20 }}>📊</span>
+          <span>Dashboard</span>
         </button>
-      </div>
-
-      {/* pages */}
-      {tab === 'recorder' && (
-        <MicTest />
-      )}
-      {tab === 'dashboard' && (
-        <Dashboard
-          userId={userId}
-          session={session}
-          key={refresh}         /* remount on tab switch so data is fresh */
-        />
-      )}
+      </nav>
     </div>
   )
 }
 
-const ghostBtn = {
-  background: 'none', border: '1px solid #d1d5db', borderRadius: 5,
-  padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#374151',
+// ── styles ────────────────────────────────────────────────────────────────────
+
+const headerStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '12px 16px',
+  background: '#ffffff',
+  borderBottom: '1px solid #e5e7eb',
+  position: 'sticky',
+  top: 0,
+  zIndex: 10,
 }
 
-const tabBar = {
-  display: 'flex', gap: 6, marginBottom: 4,
-  borderBottom: '2px solid #e5e7eb', paddingBottom: 0,
+const logoStyle = {
+  fontSize: 22,
+  fontWeight: 700,
+  color: '#16a34a',
 }
 
-const tabBtn = (active) => ({
+const avatarBtn = {
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  background: '#16a34a',
+  color: '#fff',
+  border: 'none',
+  fontSize: 14,
+  fontWeight: 700,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 44,
+  minHeight: 44,
+}
+
+const dropdownStyle = {
+  position: 'absolute',
+  top: 40,
+  right: 0,
+  background: '#fff',
+  border: '1px solid #e5e7eb',
+  borderRadius: 10,
+  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+  padding: '12px 14px',
+  minWidth: 180,
+  zIndex: 10,
+}
+
+const signOutBtn = {
   background: 'none',
   border: 'none',
-  borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
-  marginBottom: -2,
-  padding: '8px 14px',
-  cursor: 'pointer',
+  color: '#dc2626',
   fontSize: 14,
+  cursor: 'pointer',
+  padding: 0,
+  minHeight: 44,
+}
+
+const navBar = {
+  position: 'fixed',
+  bottom: 0,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  width: '100%',
+  maxWidth: 480,
+  display: 'flex',
+  background: '#ffffff',
+  borderTop: '1px solid #e5e7eb',
+  zIndex: 10,
+}
+
+const navBtn = (active) => ({
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 2,
+  minHeight: 56,
+  border: 'none',
+  background: 'none',
+  cursor: 'pointer',
+  fontSize: 11,
   fontWeight: active ? 700 : 400,
-  color: active ? '#2563eb' : '#374151',
+  color: active ? '#16a34a' : '#6b7280',
+  padding: '8px 0',
 })
 
 export default App
