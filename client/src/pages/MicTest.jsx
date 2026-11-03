@@ -581,7 +581,7 @@ function MicTest({ session }) {
             />
             <button
               onClick={applyWalkIn}
-              title="No customer — fully paid cash sale"
+              title="No customer, fully paid cash sale"
               style={ghostSmallBtn}
             >
               Walk-in (cash)
@@ -668,7 +668,7 @@ function MicTest({ session }) {
       {/* ── customer pick buttons (multiple fuzzy matches) ── */}
       {customerMatches && (
         <div style={{ ...cardStyle, borderColor: '#bfdbfe' }}>
-          <strong style={{ fontSize: 12, color: '#6b7280' }}>PAYMENT — CHOOSE CUSTOMER</strong>
+          <strong style={{ fontSize: 12, color: '#6b7280' }}>PAYMENT: CHOOSE CUSTOMER</strong>
           <p style={{ margin: '6px 0 8px', fontSize: 13 }}>
             Several customers match that name. Who did you mean?
           </p>
@@ -716,7 +716,7 @@ function MicTest({ session }) {
                 Amount paid (N$)
                 {paymentDraft.amountLabel && (
                   <span style={{ marginLeft: 6, color: '#16a34a', fontWeight: 600 }}>
-                    — {paymentDraft.amountLabel}
+                    ({paymentDraft.amountLabel})
                   </span>
                 )}
               </label>

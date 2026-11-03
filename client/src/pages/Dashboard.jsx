@@ -139,7 +139,7 @@ function ShopNameSetting({ session }) {
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           <span style={{ fontSize: 14, color: shopName ? '#1a1a1a' : '#9ca3af' }}>
-            {shopName || 'Not set — will use "Nawa"'}
+            {shopName || 'Not set. Will use "Nawa"'}
           </span>
           <button onClick={() => setEditing(true)} style={smallLinkBtn}>Edit</button>
         </div>
@@ -275,7 +275,9 @@ function Dashboard({ userId, session }) {
                         const qty  = Number(it.qty ?? 0)
                         const name = it.product_name ?? 'item'
                         const unit = it.unit
-                          ? ` ${qty === 1 ? it.unit : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
+                          ? ` ${qty === 1
+                              ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
+                              : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
                           : ''
                         return `${qty}${unit} ${name}`
                       }).join(', ')
@@ -283,10 +285,10 @@ function Dashboard({ userId, session }) {
                 </div>
                 <div style={{ marginTop: 4, fontSize: 13 }}>
                   Total: <strong>N${fmt(s.total)}</strong>
-                  {' · '}Paid: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
-                  {s.total - s.paid > 0 && (
+                  {', '}Paid: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
+                  {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
                     <span style={{ color: '#92400e', marginLeft: 6 }}>
-                      Left unpaid at sale: N${fmt(s.total - s.paid)}
+                      Still unpaid: N${fmt(currentBalance)}
                     </span>
                   )}
                 </div>
