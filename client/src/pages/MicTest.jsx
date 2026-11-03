@@ -278,7 +278,6 @@ function MicTest({ session }) {
     setParsedSale(null)
     setParseError('')
     setParseSource('')
-    setSaveMsg('')
     setValidationMsg('')
     setDraft(null)
     setClarifyingDismissed(false)
