@@ -18,7 +18,7 @@ app.use(express.json());
 
 //api routes part
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', app: 'NawaFlow' });
+  res.json({ status: 'ok', app: 'Nawa' });
 });
 app.use('/api/agent', agentRoutes);
 //catch unknown /api/* paths before the SPA fallback
@@ -40,5 +40,5 @@ const wsServer   = new WebSocketServer({ server: httpServer });
 attachTranscribeWs(wsServer);
 
 httpServer.listen(PORT, () => {
-  console.log(`NawaFlow server running on port ${PORT}`);
+  console.log(`Nawa server running on port ${PORT}`);
 });

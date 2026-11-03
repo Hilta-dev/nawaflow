@@ -22,7 +22,7 @@ function Login() {
 
   return (
     <div style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 360 }}>
-      <h1>NawaFlow</h1>
+      <h1>Nawa</h1>
       <p>Your voice. Your business. In control.</p>
       <input
         placeholder="Email"

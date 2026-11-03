@@ -31,7 +31,7 @@ function App() {
     <div style={{ padding: '16px 24px 32px', fontFamily: 'sans-serif', maxWidth: 520 }}>
       {/* header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>NawaFlow</h1>
+        <h1 style={{ margin: 0, fontSize: 22 }}>Nawa</h1>
         <button
           onClick={() => supabase.auth.signOut()}
           style={ghostBtn}
