@@ -185,3 +185,60 @@ export async function savePayment(parsedSale, userId) {
 
   return { ok: true, transactionId: txn.id }
 }
+
+/**
+ * savePaymentAction(action, userId)
+ *
+ * Saves a single payment directly from the edited review card.
+ * Unlike savePayment(), this accepts a plain action object with a
+ * pre-resolved numeric `amount` (caller must resolve "all"/"half" before calling).
+ *
+ *   1. Find the customer by name — must already exist; never creates one.
+ *   2. Insert a payment transaction row.
+ *   3. Decrement customers.balance_owed by the payment amount.
+ */
+export async function savePaymentAction(action, userId) {
+  const customerName = action.customer?.trim()
+  if (!customerName) throw new Error('No customer name in payment')
+
+  const amount = Number(action.amount)
+  if (!amount || amount <= 0) throw new Error('Payment amount must be greater than zero')
+
+  // 1. customer must already exist — do not create on payment
+  const { data: customer, error: findErr } = await supabase
+    .from('customers')
+    .select('id, balance_owed')
+    .eq('user_id', userId)
+    .ilike('name', customerName)
+    .maybeSingle()
+
+  if (findErr)   throw new Error('Customer lookup failed: ' + findErr.message)
+  if (!customer) throw new Error(`Customer "${customerName}" not found. Check the name and try again.`)
+
+  // 2. insert the payment transaction
+  const { data: txn, error: txnErr } = await supabase
+    .from('transactions')
+    .insert({
+      user_id:     userId,
+      customer_id: customer.id,
+      type:        'payment',
+      total:       amount,
+      paid:        amount,
+    })
+    .select('id')
+    .single()
+
+  if (txnErr) throw new Error('Payment insert failed: ' + txnErr.message)
+
+  // 3. reduce the customer's outstanding balance
+  const newBalance = Math.max(0, Number(customer.balance_owed ?? 0) - amount)
+  const { error: balErr } = await supabase
+    .from('customers')
+    .update({ balance_owed: newBalance })
+    .eq('id', customer.id)
+    .eq('user_id', userId)
+
+  if (balErr) throw new Error('Balance update failed: ' + balErr.message)
+
+  return { ok: true, transactionId: txn.id }
+}

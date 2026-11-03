@@ -15,55 +15,74 @@ function mockReply(transcript) {
   if (/who owes|what did i sell|how much/i.test(t)) {
     actions.push({ type: 'ask_question', question: t });
   } else {
-    // sale WITH customer: "sold N <unit> of <product> to <customer>"
-    const saleWithCustomer = t.match(
-      /sold\s+(\d+(?:\.\d+)?)\s+(?:(bags?|bottles?|packs?|kg)\s+of\s+)?([a-z ]+?)\s+to\s+([a-z]+)/i
-    );
-    // sale WITHOUT customer: "sold N <unit> of <product>" (no "to <name>")
-    const saleNoCustomer = !saleWithCustomer && t.match(
-      /sold\s+(\d+(?:\.\d+)?)\s+(?:(bags?|bottles?|packs?|kg)\s+of\s+)?([a-z ]+?)(?:\s+for\s+\d|\s+paid|\s+ow|$)/i
-    );
-
-    const paid = t.match(/paid\s+(?:me\s+)?(\d+(?:\.\d+)?)/i);
-    const forAmt = t.match(/for\s+(\d+(?:\.\d+)?)/i);   // "for 300 dollars"
-    const owes = t.match(/owe[sd]?\s+(?:me\s+)?(\d+(?:\.\d+)?)/i);
-
-    if (saleWithCustomer) {
-      const sale = saleWithCustomer;
-      if (!paid && !owes && !forAmt) {
-        question = 'How much was the total, and how much did they pay?';
+    // ── payment detection (check before sale to avoid overlap) ───────────────
+    // "John paid 50", "Maria paid me 100", "Grace settled her debt", "Tom paid half"
+    const payCustomer = t.match(/^([a-z]+)\s+(?:paid(?:\s+me)?|settled|cleared)/i);
+    if (payCustomer) {
+      const name = payCustomer[1];
+      const exactAmt = t.match(/(?:paid(?:\s+me)?|settled|cleared)[^0-9]*?(\d+(?:\.\d+)?)/i);
+      const isAll  = /settle[sd]?|cleared?|paid\s+(?:everything|it\s+all|all|(?:it\s+)?off|in\s+full|the\s+(?:full|rest|total|balance|debt))/i.test(t);
+      const isHalf = /paid\s+half/i.test(t);
+      if (isHalf) {
+        actions.push({ type: 'record_payment', customer: name, amount: null, amount_mode: 'half' });
+      } else if (isAll || (!exactAmt && /settled|cleared/i.test(t))) {
+        actions.push({ type: 'record_payment', customer: name, amount: null, amount_mode: 'all' });
+      } else if (exactAmt) {
+        actions.push({ type: 'record_payment', customer: name, amount: Number(exactAmt[1]), amount_mode: 'exact' });
       } else {
+        question = `How much did ${name} pay?`;
+      }
+    } else {
+      // ── sale detection ─────────────────────────────────────────────────────
+      // sale WITH customer: "sold N <unit> of <product> to <customer>"
+      const saleWithCustomer = t.match(
+        /sold\s+(\d+(?:\.\d+)?)\s+(?:(bags?|bottles?|packs?|kg)\s+of\s+)?([a-z ]+?)\s+to\s+([a-z]+)/i
+      );
+      // sale WITHOUT customer: "sold N <unit> of <product>" (no "to <name>")
+      const saleNoCustomer = !saleWithCustomer && t.match(
+        /sold\s+(\d+(?:\.\d+)?)\s+(?:(bags?|bottles?|packs?|kg)\s+of\s+)?([a-z ]+?)(?:\s+for\s+\d|\s+paid|\s+ow|$)/i
+      );
+
+      const paid   = t.match(/paid\s+(?:me\s+)?(\d+(?:\.\d+)?)/i);
+      const forAmt = t.match(/for\s+(\d+(?:\.\d+)?)/i);
+      const owes   = t.match(/owe[sd]?\s+(?:me\s+)?(\d+(?:\.\d+)?)/i);
+
+      if (saleWithCustomer) {
+        const sale = saleWithCustomer;
+        if (!paid && !owes && !forAmt) {
+          question = 'How much was the total, and how much did they pay?';
+        } else {
+          const paidAmount = paid   ? Number(paid[1])   : (forAmt ? Number(forAmt[1]) : 0);
+          const owedAmount = owes   ? Number(owes[1])   : 0;
+          actions.push({
+            type:     'record_sale',
+            customer: sale[4],
+            items:    [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
+            total:    paidAmount + owedAmount,
+            paid:     paidAmount,
+          });
+        }
+      } else if (saleNoCustomer) {
+        const sale = saleNoCustomer;
         const paidAmount = paid   ? Number(paid[1])   : (forAmt ? Number(forAmt[1]) : 0);
         const owedAmount = owes   ? Number(owes[1])   : 0;
-        actions.push({
-          type:     'record_sale',
-          customer: sale[4],
-          items:    [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
-          total:    paidAmount + owedAmount,
-          paid:     paidAmount,
-        });
+        if (!paidAmount && !owedAmount) {
+          question = 'How much was the total, and how much did they pay?';
+        } else {
+          actions.push({
+            type:     'record_sale',
+            customer: null,
+            items:    [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
+            total:    paidAmount + owedAmount,
+            paid:     paidAmount,
+          });
+          question = 'Who was the customer?';
+        }
       }
-    } else if (saleNoCustomer) {
-      const sale = saleNoCustomer;
-      // we know the goods and amount — but not who bought them
-      const paidAmount = paid   ? Number(paid[1])   : (forAmt ? Number(forAmt[1]) : 0);
-      const owedAmount = owes   ? Number(owes[1])   : 0;
-      if (!paidAmount && !owedAmount) {
-        question = 'How much was the total, and how much did they pay?';
-      } else {
-        actions.push({
-          type:     'record_sale',
-          customer: null,
-          items:    [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
-          total:    paidAmount + owedAmount,
-          paid:     paidAmount,
-        });
-        question = 'Who was the customer?';
-      }
-    }
 
-    const low = t.match(/(?:out of|low on|running low on)\s+([a-z ]+)/i);
-    if (low) actions.push({ type: 'flag_low_stock', product: low[1].trim() });
+      const low = t.match(/(?:out of|low on|running low on)\s+([a-z ]+)/i);
+      if (low) actions.push({ type: 'flag_low_stock', product: low[1].trim() });
+    }
 
     if (actions.length === 0 && !question) {
       question = 'Who did you sell to, and how much was paid?';

@@ -15,8 +15,17 @@ record_sale — someone bought goods:
 IMPORTANT: If the product, quantity, total, or paid amount is clear but the customer name is missing, still return a record_sale action with "customer": null and set clarifying_question to "Who was the customer?". Do NOT return an empty actions array just because the customer is unknown.
 
 record_payment — a customer paid off some or all of a debt:
-{ "type": "record_payment", "customer": "<name>", "amount": <number> }
-Examples that should produce record_payment: "Maria paid the 50 she owed", "John paid me 20", "Grace settled her debt of 100".
+{ "type": "record_payment", "customer": "<name>", "amount": <number or null>, "amount_mode": "<exact|all|half>" }
+
+amount_mode rules:
+- "exact": the speaker gave a specific number → set amount to that number.
+  Examples: "Maria paid 50", "John gave me 20 dollars", "Grace paid the 100 she owed"
+- "all": the speaker said they paid everything / the full amount / settled / cleared the debt, with NO specific number → set amount to null.
+  Examples: "Maria paid everything", "John settled his debt", "Grace cleared what she owed", "Tom paid it all off"
+- "half": the speaker said they paid half → set amount to null.
+  Examples: "Maria paid half", "John paid half of what he owes"
+
+IMPORTANT: For "all" and "half", always set amount to null — never invent a number. The app will look up the actual balance from its own database.
 
 flag_low_stock — trader is running low on something:
 { "type": "flag_low_stock", "product": "<name>" }

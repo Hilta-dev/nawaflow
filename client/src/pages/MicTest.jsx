@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
-import { saveSaleAction, savePayment } from '../lib/saveSale'
+import { saveSaleAction, savePaymentAction } from '../lib/saveSale'
 
 //wav helper part (only so you can hear the recording)
 function makeWav(chunks) {
@@ -71,6 +71,41 @@ function validateDraft(draft) {
     }
   }
   return ''
+}
+
+// ─── customer matching helpers ───────────────────────────────────────────────
+
+// Strip possessive "'s", lowercase, trim
+function normName(s) {
+  return (s ?? '').toLowerCase().replace(/['']s\b/g, '').trim()
+}
+
+// Simple edit-distance (Levenshtein) for typo tolerance
+function editDistance(a, b) {
+  const m = a.length, n = b.length
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  )
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+    }
+  }
+  return dp[m][n]
+}
+
+// Returns array of customers whose name is a close match to `parsedName`.
+// Exact (case-insensitive) first; then edit-distance ≤ 2 for short names,
+// ≤ 3 for longer names.
+function matchCustomers(parsedName, customers) {
+  const norm = normName(parsedName)
+  if (!norm) return []
+  const exact = customers.filter((c) => normName(c.name) === norm)
+  if (exact.length) return exact
+  const threshold = norm.length <= 5 ? 1 : 2
+  return customers.filter((c) => editDistance(normName(c.name), norm) <= threshold)
 }
 
 // ─── greeting helper ─────────────────────────────────────────────────────────
@@ -156,10 +191,27 @@ function MicTest({ session }) {
   const [draft,       setDraft]       = useState(null)
   const [clarifyingDismissed, setClarifyingDismissed] = useState(false)
 
+  // payment review state
+  // paymentDraft = { customer, amount (string), amountLabel, balance }
+  const [paymentDraft,  setPaymentDraft]  = useState(null)
+  // customerMatches: array of {name, balance_owed, id} shown as pick buttons
+  const [customerMatches, setCustomerMatches] = useState(null) // null = not in pick state
+
   //save state
   const [saving,      setSaving]      = useState(false)
   const [saveMsg,     setSaveMsg]     = useState('')
   const [validationMsg, setValidationMsg] = useState('')
+
+  // ── load all customers once for matching ──────────────────────────────────
+  const [myCustomers, setMyCustomers] = useState([])
+  useEffect(() => {
+    if (!userId) return
+    supabase
+      .from('customers')
+      .select('id, name, balance_owed')
+      .eq('user_id', userId)
+      .then(({ data }) => setMyCustomers(data ?? []))
+  }, [userId])
 
   //chunk callback
   const handleChunk = useCallback((buffer) => {
