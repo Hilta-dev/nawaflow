@@ -565,7 +565,9 @@ function MicTest({ session }) {
 
   const nameBlocked           = draft &&
     (!draft.customer.trim() || draft.customer.trim().toLowerCase() === 'unknown')
-  const hasClarifyingQuestion = !!parsedSale?.clarifying_question && !clarifyingDismissed
+  const hasClarifyingQuestion = !!parsedSale?.clarifying_question && !clarifyingDismissed &&
+    !(draft && draft.customer.trim() && draft.customer.trim().toLowerCase() !== 'unknown' &&
+      Number(draft.total) > 0)
   const paymentOverpaid       = paymentDraft && paymentDraft.balance > 0 &&
     Number(paymentDraft.amount) > paymentDraft.balance
   const confirmDisabled       = saving || nameBlocked || hasClarifyingQuestion ||
