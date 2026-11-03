@@ -10,7 +10,9 @@ When given a voice transcript of a sale, payment, or stock update, extract the s
 Action types:
 
 record_sale — someone bought goods:
-{ "type": "record_sale", "customer": "<name>", "items": [{ "product": "<name>", "qty": <number>, "unit": "<bags|bottles|kg|null>" }], "total": <number>, "paid": <number> }
+{ "type": "record_sale", "customer": "<name or null>", "items": [{ "product": "<name>", "qty": <number>, "unit": "<bags|bottles|kg|null>" }], "total": <number>, "paid": <number> }
+
+IMPORTANT: If the product, quantity, total, or paid amount is clear but the customer name is missing, still return a record_sale action with "customer": null and set clarifying_question to "Who was the customer?". Do NOT return an empty actions array just because the customer is unknown.
 
 record_payment — a customer paid off some or all of a debt:
 { "type": "record_payment", "customer": "<name>", "amount": <number> }

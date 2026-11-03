@@ -15,25 +15,50 @@ function mockReply(transcript) {
   if (/who owes|what did i sell|how much/i.test(t)) {
     actions.push({ type: 'ask_question', question: t });
   } else {
-    const sale = t.match(
+    // sale WITH customer: "sold N <unit> of <product> to <customer>"
+    const saleWithCustomer = t.match(
       /sold\s+(\d+(?:\.\d+)?)\s+(?:(bags?|bottles?|packs?|kg)\s+of\s+)?([a-z ]+?)\s+to\s+([a-z]+)/i
     );
+    // sale WITHOUT customer: "sold N <unit> of <product>" (no "to <name>")
+    const saleNoCustomer = !saleWithCustomer && t.match(
+      /sold\s+(\d+(?:\.\d+)?)\s+(?:(bags?|bottles?|packs?|kg)\s+of\s+)?([a-z ]+?)(?:\s+for\s+\d|\s+paid|\s+ow|$)/i
+    );
+
     const paid = t.match(/paid\s+(?:me\s+)?(\d+(?:\.\d+)?)/i);
+    const forAmt = t.match(/for\s+(\d+(?:\.\d+)?)/i);   // "for 300 dollars"
     const owes = t.match(/owe[sd]?\s+(?:me\s+)?(\d+(?:\.\d+)?)/i);
 
-    if (sale) {
-      if (!paid && !owes) {
+    if (saleWithCustomer) {
+      const sale = saleWithCustomer;
+      if (!paid && !owes && !forAmt) {
         question = 'How much was the total, and how much did they pay?';
       } else {
-        const paidAmount = paid ? Number(paid[1]) : 0;
-        const owedAmount = owes ? Number(owes[1]) : 0;
+        const paidAmount = paid   ? Number(paid[1])   : (forAmt ? Number(forAmt[1]) : 0);
+        const owedAmount = owes   ? Number(owes[1])   : 0;
         actions.push({
-          type: 'record_sale',
+          type:     'record_sale',
           customer: sale[4],
-          items: [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
-          total: paidAmount + owedAmount,
-          paid: paidAmount,
+          items:    [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
+          total:    paidAmount + owedAmount,
+          paid:     paidAmount,
         });
+      }
+    } else if (saleNoCustomer) {
+      const sale = saleNoCustomer;
+      // we know the goods and amount — but not who bought them
+      const paidAmount = paid   ? Number(paid[1])   : (forAmt ? Number(forAmt[1]) : 0);
+      const owedAmount = owes   ? Number(owes[1])   : 0;
+      if (!paidAmount && !owedAmount) {
+        question = 'How much was the total, and how much did they pay?';
+      } else {
+        actions.push({
+          type:     'record_sale',
+          customer: null,
+          items:    [{ product: sale[3].trim(), qty: Number(sale[1]), unit: sale[2] || null }],
+          total:    paidAmount + owedAmount,
+          paid:     paidAmount,
+        });
+        question = 'Who was the customer?';
       }
     }
 
