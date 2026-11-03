@@ -275,7 +275,7 @@ function Dashboard({ userId, session }) {
                         const qty  = Number(it.qty ?? 0)
                         const name = it.product_name ?? 'item'
                         const unit = it.unit
-                          ? ` ${qty === 1
+                          ? ` ${qty <= 1
                               ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
                               : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
                           : ''
@@ -285,7 +285,7 @@ function Dashboard({ userId, session }) {
                 </div>
                 <div style={{ marginTop: 4, fontSize: 13 }}>
                   Total: <strong>N${fmt(s.total)}</strong>
-                  {', '}Paid: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
+                  {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
                   {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
                     <span style={{ color: '#92400e', marginLeft: 6 }}>
                       Still unpaid: N${fmt(currentBalance)}
