@@ -98,6 +98,8 @@ function MicTest() {
 
   //editable draft for the sale card
   const [draft,       setDraft]       = useState(null)   // null = no card shown
+  // true once the user has resolved the clarifying question by picking Walk-in or typing a real name
+  const [clarifyingDismissed, setClarifyingDismissed] = useState(false)
 
   //save state
   const [saving,      setSaving]      = useState(false)
@@ -134,6 +136,7 @@ function MicTest() {
     setSaveMsg('')
     setValidationMsg('')
     setDraft(null)
+    setClarifyingDismissed(false)
   }
 
   //begin recording
@@ -197,6 +200,12 @@ function MicTest() {
   function setDraftField(field, value) {
     setDraft((d) => ({ ...d, [field]: value }))
     setValidationMsg('')
+    // dismiss the clarifying question once the user types a real customer name
+    if (field === 'customer') {
+      const trimmed = value.trim().toLowerCase()
+      if (trimmed && trimmed !== 'unknown') setClarifyingDismissed(true)
+      else setClarifyingDismissed(false)
+    }
   }
 
   function setItemField(key, field, value) {
@@ -207,13 +216,14 @@ function MicTest() {
     setValidationMsg('')
   }
 
-  // set customer to Walk-in and force paid = total (no debt)
+  // set customer to Walk-in and force paid = total (no debt); dismiss any clarifying question
   function applyWalkIn() {
     setDraft((d) => {
       const total = d.total
       return { ...d, customer: 'Walk-in', paid: total }
     })
     setValidationMsg('')
+    setClarifyingDismissed(true)
   }
 
   // ── save ──────────────────────────────────────────────────────────────────
@@ -223,8 +233,8 @@ function MicTest() {
 
     // run validation before touching Supabase
     if (draft) {
-      // block if parser returned a clarifying question
-      if (parsedSale.clarifying_question) {
+      // block if parser returned a clarifying question that the user has not resolved
+      if (parsedSale.clarifying_question && !clarifyingDismissed) {
         setValidationMsg('Please answer the question above before saving.')
         return
       }
@@ -294,7 +304,7 @@ function MicTest() {
   // confirm button is disabled when there is a clarifying question, or customer is empty/unknown
   const nameBlocked = draft &&
     (!draft.customer.trim() || draft.customer.trim().toLowerCase() === 'unknown')
-  const hasClarifyingQuestion = !!parsedSale?.clarifying_question
+  const hasClarifyingQuestion = !!parsedSale?.clarifying_question && !clarifyingDismissed
   const confirmDisabled = saving || nameBlocked || hasClarifyingQuestion
 
   const wsStatusColor = {
