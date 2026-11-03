@@ -24,7 +24,6 @@ function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
   async function save() {
     if (invalid) return
     setSaving(true)
-    // Store normalised (+264...) or empty
     const stored = normalisePhone(value) || (value.trim() ? value.trim() : null)
     const { error } = await supabase
       .from('customers')
@@ -81,79 +80,14 @@ function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
   )
 }
 
-// ── shop name settings box ────────────────────────────────────────────────────
-
-function ShopNameSetting({ session }) {
-  const initial = session?.user?.user_metadata?.shop_name ?? ''
-  const [shopName, setShopName] = useState(initial)
-  const [editing,  setEditing]  = useState(false)
-  const [draft,    setDraft]    = useState(initial)
-  const [saving,   setSaving]   = useState(false)
-  const [msg,      setMsg]      = useState('')
-
-  async function save() {
-    setSaving(true)
-    setMsg('')
-    const { error } = await supabase.auth.updateUser({
-      data: { shop_name: draft.trim() },
-    })
-    setSaving(false)
-    if (error) {
-      setMsg('Could not save: ' + error.message)
-    } else {
-      setShopName(draft.trim())
-      setEditing(false)
-    }
-  }
-
-  return (
-    <div style={{ marginBottom: 16, padding: '10px 14px',
-                  background: '#ffffff', border: '1px solid #e5e7eb',
-                  borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280',
-                     textTransform: 'uppercase', letterSpacing: '.04em' }}>
-        Shop name
-      </span>
-      {editing ? (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Your shop name"
-            style={{ flex: 1, padding: '8px 10px', fontSize: 14,
-                     border: '1px solid #d1d5db', borderRadius: 6,
-                     boxSizing: 'border-box', minHeight: 44 }}
-            autoFocus
-          />
-          <button onClick={save} disabled={saving}
-            style={{ ...smallBtn('#16a34a'), padding: '8px 14px', fontSize: 13, minHeight: 44 }}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button onClick={() => { setDraft(shopName); setEditing(false) }}
-            style={{ ...smallBtn('#6b7280'), padding: '8px 12px', fontSize: 13, minHeight: 44 }}>
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <span style={{ fontSize: 14, color: shopName ? '#1a1a1a' : '#9ca3af' }}>
-            {shopName || 'Not set. Will use "Nawa"'}
-          </span>
-          <button onClick={() => setEditing(true)} style={smallLinkBtn}>Edit</button>
-        </div>
-      )}
-      {msg && <p style={{ margin: '4px 0 0', fontSize: 12, color: '#dc2626' }}>{msg}</p>}
-    </div>
-  )
-}
-
 // ── main dashboard ────────────────────────────────────────────────────────────
 
 function Dashboard({ userId, session }) {
   const { data, loading, error, refresh } = useDashboard(userId)
 
-  // local phone state so the UI updates without a full reload
-  const [phoneMap, setPhoneMap] = useState({})   // { [customerId]: phone }
+  const [phoneMap,       setPhoneMap]       = useState({})
+  const [showAllDebtors, setShowAllDebtors] = useState(false)
+  const [showAllActivity,setShowAllActivity]= useState(false)
 
   function getPhone(debtor) {
     return phoneMap[debtor.id] !== undefined ? phoneMap[debtor.id] : debtor.phone
@@ -168,13 +102,12 @@ function Dashboard({ userId, session }) {
   if (loading) return <p style={msgStyle}>Loading…</p>
   if (error)   return <p style={{ ...msgStyle, color: '#dc2626' }}>Error: {error}</p>
 
-  const { totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, customerBalanceMap } = data
+  const { totalSales, totalOwed, customerCount, debtors, recentActivity, customerBalanceMap } = data
 
   // Empty state
   if (totalSales === 0) {
     return (
       <div style={wrapStyle}>
-        <ShopNameSetting session={session} />
         <p style={{ color: '#6b7280', textAlign: 'center', padding: '32px 0' }}>
           No sales yet. Record your first sale.
         </p>
@@ -182,10 +115,11 @@ function Dashboard({ userId, session }) {
     )
   }
 
+  const visibleDebtors  = showAllDebtors   ? debtors          : debtors.slice(0, 5)
+  const visibleActivity = showAllActivity  ? recentActivity    : recentActivity.slice(0, 5)
+
   return (
     <div style={wrapStyle}>
-      {/* shop name setting */}
-      <ShopNameSetting session={session} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16 }}>Dashboard</h3>
@@ -194,9 +128,9 @@ function Dashboard({ userId, session }) {
 
       {/* totals */}
       <div style={cardRow}>
-        <StatCard label="Total sales"    value={totalSales} />
-        <StatCard label="Total owed"     value={`N$${fmt(totalOwed)}`} />
-        <StatCard label="Customers"      value={customerCount} />
+        <StatCard label="Total sales"  value={totalSales} />
+        <StatCard label="Total owed"   value={`N$${fmt(totalOwed)}`} />
+        <StatCard label="Customers"    value={customerCount} />
       </div>
 
       {/* debtors */}
@@ -204,7 +138,7 @@ function Dashboard({ userId, session }) {
         <section style={{ marginTop: 20 }}>
           <h4 style={sectionHead}>Who owes you money</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {debtors.map((d) => {
+            {visibleDebtors.map((d) => {
               const phone   = getPhone(d)
               const kind    = isValidPhone(phone)
               const urls    = (kind === 'mobile' || kind === 'landline' || kind === 'international')
@@ -220,13 +154,10 @@ function Dashboard({ userId, session }) {
                     </span>
                   </div>
 
-                  {/* phone display line */}
                   <p style={{ margin: '2px 0 6px', fontSize: 12, color: '#6b7280' }}>
                     {!phone && 'No number saved'}
                     {phone && kind === 'invalid' && (
-                      <span style={{ color: '#dc2626' }}>
-                        Number needs fixing.{' '}
-                      </span>
+                      <span style={{ color: '#dc2626' }}>Number needs fixing.{' '}</span>
                     )}
                     {phone && kind !== 'invalid' && display}
                     {phone && kind === 'landline' && (
@@ -236,7 +167,6 @@ function Dashboard({ userId, session }) {
                     )}
                   </p>
 
-                  {/* contact buttons */}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <PhoneEditor
                       debtorId={d.id}
@@ -249,12 +179,8 @@ function Dashboard({ userId, session }) {
                         <a href={urls.wa} target="_blank" rel="noopener noreferrer" style={waBtn}>
                           WhatsApp
                         </a>
-                        <a href={urls.sms} style={smsBtn}>
-                          SMS
-                        </a>
-                        <a href={urls.tel} style={callBtn}>
-                          Call
-                        </a>
+                        <a href={urls.sms} style={smsBtn}>SMS</a>
+                        <a href={urls.tel} style={callBtn}>Call</a>
                       </>
                     )}
                   </div>
@@ -267,81 +193,102 @@ function Dashboard({ userId, session }) {
               )
             })}
           </div>
+
+          {debtors.length > 5 && (
+            <button
+              onClick={() => setShowAllDebtors((v) => !v)}
+              style={{ ...ghostBtn, marginTop: 10, width: '100%' }}
+            >
+              {showAllDebtors
+                ? 'Show less'
+                : `See all debtors (${debtors.length})`}
+            </button>
+          )}
         </section>
       )}
 
-      {/* recent sales */}
+      {/* recent activity */}
       <section style={{ marginTop: 20 }}>
-        <h4 style={sectionHead}>Recent sales</h4>
-        {recentSales.length === 0
-          ? <p style={{ fontSize: 13, color: '#6b7280' }}>No sales recorded yet.</p>
-          : recentSales.map((s) => {
-            const isWalkIn = s.customerName?.toLowerCase() === 'walk-in'
-            const currentBalance = (s.customerId && customerBalanceMap)
-              ? (customerBalanceMap[s.customerId] ?? null)
-              : null
+        <h4 style={sectionHead}>Recent activity</h4>
+
+        {recentActivity.length === 0 && (
+          <p style={{ fontSize: 13, color: '#6b7280' }}>No activity yet.</p>
+        )}
+
+        {visibleActivity.map((item) => {
+          if (item.kind === 'payment') {
             return (
-              <div key={s.id} style={saleCard}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <strong>{s.customerName}</strong>
-                    {!isWalkIn && currentBalance !== null && (
-                      currentBalance <= 0
-                        ? <span style={chipGreen}>Settled ✓</span>
-                        : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: 12, color: '#6b7280', flexShrink: 0, marginLeft: 8 }}>
-                    {new Date(s.createdAt).toLocaleDateString('en-NA')}
+              <div key={`pay-${item.id}`} style={{ ...saleCard, borderColor: '#bbf7d0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13 }}>
+                    <span style={chipGreen}>Payment</span>{' '}
+                    <strong>{item.customerName}</strong>{' paid '}
+                    <strong style={{ color: '#166534' }}>N${fmt(item.amount)}</strong>
                   </span>
-                </div>
-                <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-                  {s.items.length > 0
-                    ? s.items.map((it) => {
-                        const qty  = Number(it.qty ?? 0)
-                        const name = it.product_name ?? 'item'
-                        const unit = it.unit
-                          ? ` ${qty <= 1
-                              ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
-                              : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
-                          : ''
-                        return `${qty}${unit} ${name}`
-                      }).join(', ')
-                    : 'No item detail'}
-                </div>
-                <div style={{ marginTop: 4, fontSize: 13 }}>
-                  Total: <strong>N${fmt(s.total)}</strong>
-                  {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
-                  {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
-                    <span style={{ color: '#92400e', marginLeft: 6 }}>
-                      Still unpaid: N${fmt(currentBalance)}
-                    </span>
-                  )}
+                  <span style={{ fontSize: 12, color: '#6b7280', flexShrink: 0, marginLeft: 8 }}>
+                    {new Date(item.createdAt).toLocaleDateString('en-NA')}
+                  </span>
                 </div>
               </div>
             )
-          })}
-      </section>
+          }
 
-      {/* recent payments */}
-      {recentPayments.length > 0 && (
-        <section style={{ marginTop: 20 }}>
-          <h4 style={sectionHead}>Recent payments received</h4>
-          {recentPayments.map((p) => (
-            <div key={p.id} style={{ ...saleCard, borderColor: '#bbf7d0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 13 }}>
-                  <strong>{p.customerName}</strong> paid{' '}
-                  <strong style={{ color: '#166534' }}>N${fmt(p.amount)}</strong>
-                </span>
-                <span style={{ fontSize: 12, color: '#6b7280' }}>
-                  {new Date(p.createdAt).toLocaleDateString('en-NA')}
+          // kind === 'sale'
+          const isWalkIn = item.customerName?.toLowerCase() === 'walk-in'
+          const currentBalance = (item.customerId && customerBalanceMap)
+            ? (customerBalanceMap[item.customerId] ?? null)
+            : null
+          return (
+            <div key={`sale-${item.id}`} style={saleCard}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <strong>{item.customerName}</strong>
+                  {!isWalkIn && currentBalance !== null && (
+                    currentBalance <= 0
+                      ? <span style={chipGreen}>Settled ✓</span>
+                      : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
+                  )}
+                </div>
+                <span style={{ fontSize: 12, color: '#6b7280', flexShrink: 0, marginLeft: 8 }}>
+                  {new Date(item.createdAt).toLocaleDateString('en-NA')}
                 </span>
               </div>
+              <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
+                {item.items.length > 0
+                  ? item.items.map((it) => {
+                      const qty  = Number(it.qty ?? 0)
+                      const name = it.product_name ?? 'item'
+                      const unit = it.unit
+                        ? ` ${qty <= 1
+                            ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
+                            : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
+                        : ''
+                      return `${qty}${unit} ${name}`
+                    }).join(', ')
+                  : 'No item detail'}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 13 }}>
+                Total: <strong>N${fmt(item.total)}</strong>
+                {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(item.paid)}</strong>
+                {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
+                  <span style={{ color: '#92400e', marginLeft: 6 }}>
+                    Still unpaid: N${fmt(currentBalance)}
+                  </span>
+                )}
+              </div>
             </div>
-          ))}
-        </section>
-      )}
+          )
+        })}
+
+        {recentActivity.length > 5 && (
+          <button
+            onClick={() => setShowAllActivity((v) => !v)}
+            style={{ ...ghostBtn, marginTop: 4, width: '100%' }}
+          >
+            {showAllActivity ? 'Show less' : `See all (${recentActivity.length})`}
+          </button>
+        )}
+      </section>
     </div>
   )
 }
@@ -356,7 +303,7 @@ function StatCard({ label, value }) {
   )
 }
 
-// ─── styles ────────────────────────────────────────────────────────────────────
+// ─── styles ───────────────────────────────────────────────────────────────────
 const wrapStyle   = { padding: '16px 16px 8px' }
 const msgStyle    = { padding: 24 }
 const sectionHead = { margin: '0 0 8px', fontSize: 11, fontWeight: 700,
@@ -372,7 +319,7 @@ const saleCard = { background: '#f8fafc', border: '1px solid #e2e8f0',
                    borderRadius: 10, padding: '10px 12px', marginBottom: 8 }
 const ghostBtn = { background: 'none', border: '1px solid #d1d5db', borderRadius: 6,
                    padding: '6px 12px', fontSize: 13, cursor: 'pointer', color: '#374151',
-                   minHeight: 36 }
+                   minHeight: 44 }
 const smallBtn = (bg) => ({
   background: bg, color: '#fff', border: 'none',
   borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer',

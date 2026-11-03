@@ -43,7 +43,7 @@ export function useDashboard(userId) {
           .select('id, name, balance_owed, phone')
           .eq('user_id', userId),
 
-        // 5 most recent sales with items
+        // 30 most recent sales with items
         supabase
           .from('transactions')
           .select(`
@@ -58,16 +58,16 @@ export function useDashboard(userId) {
           .eq('user_id', userId)
           .eq('type', 'sale')
           .order('created_at', { ascending: false })
-          .limit(5),
+          .limit(30),
 
-        // 5 most recent payments
+        // 30 most recent payments
         supabase
           .from('transactions')
           .select('id, created_at, total, customers ( name )')
           .eq('user_id', userId)
           .eq('type', 'payment')
           .order('created_at', { ascending: false })
-          .limit(5),
+          .limit(30),
       ])
 
       if (salesCountRes.error) throw salesCountRes.error
@@ -95,6 +95,7 @@ export function useDashboard(userId) {
       }
 
       const recentSales = (recentSalesRes.data ?? []).map((t) => ({
+        kind:         'sale',
         id:           t.id,
         createdAt:    t.created_at,
         customerName: t.customers?.name ?? 'Unknown',
@@ -105,13 +106,19 @@ export function useDashboard(userId) {
       }))
 
       const recentPayments = (recentPaysRes.data ?? []).map((t) => ({
+        kind:         'payment',
         id:           t.id,
         createdAt:    t.created_at,
         customerName: t.customers?.name ?? 'Unknown',
         amount:       t.total ?? 0,
       }))
 
-      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, customerBalanceMap })
+      // Merged activity list: sales and payments interleaved newest-first
+      const recentActivity = [...recentSales, ...recentPayments]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 30)
+
+      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, recentActivity, customerBalanceMap })
     } catch (err) {
       setError(err.message || 'Failed to load dashboard')
     } finally {

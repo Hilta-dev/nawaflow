@@ -4,6 +4,78 @@ import Login from './pages/Login'
 import MicTest from './pages/MicTest'
 import Dashboard from './pages/Dashboard'
 
+// ── inline shop name editor for the account menu ─────────────────────────────
+function ShopNameMenuItem({ session }) {
+  const initial = session?.user?.user_metadata?.shop_name ?? ''
+  const [shopName, setShopName] = useState(initial)
+  const [editing,  setEditing]  = useState(false)
+  const [draft,    setDraft]    = useState(initial)
+  const [saving,   setSaving]   = useState(false)
+  const [msg,      setMsg]      = useState('')
+
+  async function save() {
+    setSaving(true)
+    setMsg('')
+    const { error } = await supabase.auth.updateUser({ data: { shop_name: draft.trim() } })
+    setSaving(false)
+    if (error) {
+      setMsg('Could not save: ' + error.message)
+    } else {
+      setShopName(draft.trim())
+      setEditing(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #e5e7eb' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280',
+                    textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>
+        Shop name
+      </div>
+      {editing ? (
+        <>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Your shop name"
+            style={{ width: '100%', padding: '7px 8px', fontSize: 13,
+                     border: '1px solid #d1d5db', borderRadius: 6,
+                     boxSizing: 'border-box', minHeight: 44, marginBottom: 6 }}
+            autoFocus
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={save} disabled={saving}
+              style={{ flex: 1, background: '#16a34a', color: '#fff', border: 'none',
+                       borderRadius: 6, padding: '6px 0', fontSize: 13, cursor: 'pointer',
+                       minHeight: 44 }}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => { setDraft(shopName); setEditing(false) }}
+              style={{ flex: 1, background: 'none', border: '1px solid #d1d5db',
+                       borderRadius: 6, padding: '6px 0', fontSize: 13, cursor: 'pointer',
+                       minHeight: 44 }}>
+              Cancel
+            </button>
+          </div>
+          {msg && <p style={{ margin: '4px 0 0', fontSize: 12, color: '#dc2626' }}>{msg}</p>}
+        </>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, color: shopName ? '#1a1a1a' : '#9ca3af', flex: 1 }}>
+            {shopName || 'Not set. Will use "Nawa"'}
+          </span>
+          <button onClick={() => setEditing(true)}
+            style={{ background: 'none', border: 'none', color: '#16a34a',
+                     fontSize: 13, cursor: 'pointer', padding: 0,
+                     textDecoration: 'underline', minHeight: 44 }}>
+            Edit
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -52,9 +124,10 @@ function App() {
                 style={{ position: 'fixed', inset: 0, zIndex: 9 }}
               />
               <div style={dropdownStyle}>
-                <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6b7280', wordBreak: 'break-all' }}>
+                <p style={{ margin: '0 0 10px', fontSize: 12, color: '#6b7280', wordBreak: 'break-all' }}>
                   {email}
                 </p>
+                <ShopNameMenuItem session={session} />
                 <button
                   onClick={() => supabase.auth.signOut()}
                   style={signOutBtn}
