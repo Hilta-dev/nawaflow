@@ -1,23 +1,48 @@
 import { supabase } from './supabase'
 
 /**
- * saveSale(parsedSale, userId)
+ * saveSaleAction(action, userId)
  *
- * Writes one record_sale action to Supabase:
- *   1. Upsert the customer by name (create if new, return existing id).
- *   2. Insert a transaction row.
- *   3. Insert transaction_items rows (one per item in the sale).
+ * Writes a single record_sale action object to Supabase.
+ * The action comes directly from the edited review card (not the raw parsedSale).
+ *
+ *   1. Reject empty or "unknown" customer names — caller must supply "Walk-in"
+ *      for cash sales, or a real name.
+ *   2. Upsert the customer by name (create if new, return existing id).
+ *   3. Insert a transaction row.
+ *   4. Insert transaction_items rows (one per item).
+ *   5. Update customers.balance_owed with the unpaid portion.
  *
  * Returns { ok: true } on success, throws on failure.
  */
-export async function saveSale(parsedSale, userId) {
-  const action = parsedSale.actions?.find((a) => a.type === 'record_sale')
-  if (!action) throw new Error('No record_sale action in parsed result')
+export async function saveSaleAction(action, userId) {
+  if (!action) throw new Error('No sale action provided')
 
-  const customerName = action.customer?.trim() || 'Unknown customer'
-  const saleTotal    = Number(action.total ?? 0)
-  const salePaid     = Number(action.paid  ?? 0)
-  const unpaid       = Math.max(0, saleTotal - salePaid)
+  const customerName = action.customer?.trim()
+  if (!customerName || customerName.toLowerCase() === 'unknown') {
+    throw new Error('Customer name is required. Use "Walk-in" for cash sales.')
+  }
+
+  const saleTotal = Number(action.total ?? 0)
+  const salePaid  = Number(action.paid  ?? 0)
+
+  if (saleTotal <= 0) throw new Error('Sale total must be greater than 0.')
+  if (salePaid < 0 || salePaid > saleTotal) {
+    throw new Error('Paid amount must be between 0 and the total.')
+  }
+
+  // Walk-in sales must never create a debt
+  if (customerName.toLowerCase() === 'walk-in' && salePaid < saleTotal) {
+    throw new Error('Walk-in (cash) sales must be fully paid.')
+  }
+
+  for (const it of action.items ?? []) {
+    if (Number(it.qty) <= 0) {
+      throw new Error(`Quantity for "${it.product || 'item'}" must be greater than 0.`)
+    }
+  }
+
+  const unpaid = Math.max(0, saleTotal - salePaid)
 
   // 1. find or create the customer; read current balance_owed
   const { data: existing, error: findErr } = await supabase
@@ -53,7 +78,6 @@ export async function saveSale(parsedSale, userId) {
       type:        'sale',
       total:       saleTotal,
       paid:        salePaid,
-      note:        parsedSale.clarifying_question ?? null,
     })
     .select('id')
     .single()

@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
-import { saveSale, savePayment } from '../lib/saveSale'
+import { saveSaleAction, savePayment } from '../lib/saveSale'
 
 //wav helper part (only so you can hear the recording)
 function makeWav(chunks) {
@@ -32,6 +32,48 @@ function makeWav(chunks) {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
+// ─── editable sale card helpers ──────────────────────────────────────────────
+
+// initialise editable state from a record_sale action
+function initDraft(action) {
+  return {
+    customer: action.customer ?? '',
+    items: (action.items ?? []).map((it, i) => ({
+      key: i,
+      product: it.product ?? '',
+      qty:     String(it.qty ?? ''),
+      unit:    it.unit ?? '',
+    })),
+    total:   String(action.total ?? ''),
+    paid:    String(action.paid  ?? ''),
+  }
+}
+
+// returns an error string or '' — validates all business rules
+function validateDraft(draft) {
+  const name = draft.customer.trim().toLowerCase()
+  if (!draft.customer.trim() || name === 'unknown') {
+    return 'Please enter a customer name, or choose "Walk-in (cash sale)".'
+  }
+  const total = Number(draft.total)
+  if (!draft.total.trim() || isNaN(total) || total <= 0) {
+    return 'Total must be greater than 0.'
+  }
+  const paid = Number(draft.paid)
+  if (draft.paid.trim() === '' || isNaN(paid) || paid < 0 || paid > total) {
+    return 'Amount paid must be between 0 and the total.'
+  }
+  for (const it of draft.items) {
+    const qty = Number(it.qty)
+    if (!it.qty.trim() || isNaN(qty) || qty <= 0) {
+      return `Quantity for "${it.product || 'item'}" must be greater than 0.`
+    }
+  }
+  return ''
+}
+
+// ─── main component ───────────────────────────────────────────────────────────
+
 function MicTest() {
   const chunksRef       = useRef([])
   const silenceTimerRef = useRef(null)
@@ -54,9 +96,13 @@ function MicTest() {
   const [parsing,     setParsing]     = useState(false)
   const [parseSource, setParseSource] = useState('')
 
+  //editable draft for the sale card
+  const [draft,       setDraft]       = useState(null)   // null = no card shown
+
   //save state
   const [saving,      setSaving]      = useState(false)
   const [saveMsg,     setSaveMsg]     = useState('')
+  const [validationMsg, setValidationMsg] = useState('')
 
   //chunk callback
   const handleChunk = useCallback((buffer) => {
@@ -86,6 +132,8 @@ function MicTest() {
     setParseError('')
     setParseSource('')
     setSaveMsg('')
+    setValidationMsg('')
+    setDraft(null)
   }
 
   //begin recording
@@ -133,6 +181,9 @@ function MicTest() {
         setParseError(data.clarifying_question)
       } else {
         setParsedSale(data)
+        // initialise editable draft for sale actions
+        const saleAction = data.actions?.find((a) => a.type === 'record_sale')
+        if (saleAction) setDraft(initDraft(saleAction))
       }
     } catch (err) {
       setParseError(err.message)
@@ -141,17 +192,90 @@ function MicTest() {
     }
   }
 
-  //confirm and save to Supabase — routes to sale or payment handler
+  // ── draft editors ──────────────────────────────────────────────────────────
+
+  function setDraftField(field, value) {
+    setDraft((d) => ({ ...d, [field]: value }))
+    setValidationMsg('')
+  }
+
+  function setItemField(key, field, value) {
+    setDraft((d) => ({
+      ...d,
+      items: d.items.map((it) => it.key === key ? { ...it, [field]: value } : it),
+    }))
+    setValidationMsg('')
+  }
+
+  // set customer to Walk-in and force paid = total (no debt)
+  function applyWalkIn() {
+    setDraft((d) => {
+      const total = d.total
+      return { ...d, customer: 'Walk-in', paid: total }
+    })
+    setValidationMsg('')
+  }
+
+  // ── save ──────────────────────────────────────────────────────────────────
+
   async function confirmSave() {
     if (!parsedSale) return
+
+    // run validation before touching Supabase
+    if (draft) {
+      // block if parser returned a clarifying question
+      if (parsedSale.clarifying_question) {
+        setValidationMsg('Please answer the question above before saving.')
+        return
+      }
+      const vErr = validateDraft(draft)
+      if (vErr) {
+        setValidationMsg(vErr)
+        return
+      }
+      // Walk-in: paid must equal total (no debt allowed)
+      if (draft.customer.trim().toLowerCase() === 'walk-in') {
+        const total = Number(draft.total)
+        const paid  = Number(draft.paid)
+        if (paid < total) {
+          setValidationMsg(
+            'A walk-in (cash) sale must be fully paid. Enter a customer name to record a debt.'
+          )
+          return
+        }
+      }
+    }
+
     setSaving(true)
     setSaveMsg('')
+    setValidationMsg('')
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not signed in')
-      if (hasSale)    await saveSale(parsedSale, user.id)
+
+      if (draft) {
+        // build the action from edited draft values and pass it directly
+        const editedAction = {
+          type:     'record_sale',
+          customer: draft.customer.trim(),
+          total:    Number(draft.total),
+          paid:     Number(draft.paid),
+          items:    draft.items.map((it) => ({
+            product: it.product.trim(),
+            qty:     Number(it.qty),
+            unit:    it.unit,
+          })),
+        }
+        await saveSaleAction(editedAction, user.id)
+      }
+
+      const hasPayment = parsedSale?.actions?.some((a) => a.type === 'record_payment')
       if (hasPayment) await savePayment(parsedSale, user.id)
+
+      // clear the review card and show success
       setSaveMsg('✓ Saved')
+      setParsedSale(null)
+      setDraft(null)
     } catch (err) {
       setSaveMsg('Save failed: ' + err.message)
     } finally {
@@ -159,12 +283,19 @@ function MicTest() {
     }
   }
 
+  // ── derived ───────────────────────────────────────────────────────────────
+
   const seconds = (stats.bytes / 2 / 24000).toFixed(1)
-  const displayText  = finalText || liveText
-  const hasSale      = parsedSale?.actions?.some((a) => a.type === 'record_sale')
-  const hasPayment   = parsedSale?.actions?.some((a) => a.type === 'record_payment')
+  const displayText   = finalText || liveText
+  const hasSale       = parsedSale?.actions?.some((a) => a.type === 'record_sale')
+  const hasPayment    = parsedSale?.actions?.some((a) => a.type === 'record_payment')
   const paymentAction = parsedSale?.actions?.find((a) => a.type === 'record_payment')
-  const saleAction    = parsedSale?.actions?.find((a) => a.type === 'record_sale')
+
+  // confirm button is disabled when there is a clarifying question, or customer is empty/unknown
+  const nameBlocked = draft &&
+    (!draft.customer.trim() || draft.customer.trim().toLowerCase() === 'unknown')
+  const hasClarifyingQuestion = !!parsedSale?.clarifying_question
+  const confirmDisabled = saving || nameBlocked || hasClarifyingQuestion
 
   const wsStatusColor = {
     idle: '#888', connecting: '#b45309', connected: '#166534',
@@ -248,31 +379,108 @@ function MicTest() {
       {/* parse error */}
       {parseError && <p style={{ color: '#b45309', margin: '6px 0' }}>{parseError}</p>}
 
-      {/* parsed sale result */}
-      {hasSale && (
+      {/* ── editable sale card ── */}
+      {hasSale && draft && (
         <div style={boxStyle}>
-          <SourceBadge label="PARSED SALE" source={parseSource} />
-          <p style={{ margin: '6px 0 0', fontSize: 13 }}>
-            <strong>{saleAction.customer || 'Unknown'}</strong>
-            {' — '}
-            {(saleAction.items ?? []).map((it) => {
-              const unit = it.unit ? ` ${it.unit} of` : ''
-              return `${it.qty}${unit} ${it.product}`
-            }).join(', ') || 'no items'}
-          </p>
-          <p style={{ margin: '4px 0 0', fontSize: 13 }}>
-            Total: <strong>N${saleAction.total ?? 0}</strong>
-            {' · '}Paid: <strong>N${saleAction.paid ?? 0}</strong>
-            {(saleAction.total - saleAction.paid) > 0 && (
-              <span style={{ color: '#dc2626', marginLeft: 6 }}>
-                Owes N${saleAction.total - saleAction.paid}
-              </span>
-            )}
-          </p>
+          <SourceBadge label="SALE REVIEW" source={parseSource} />
+
+          {/* clarifying question — blocks save */}
+          {hasClarifyingQuestion && (
+            <p style={{ margin: '8px 0 4px', fontSize: 13,
+                        color: '#92400e', background: '#fef3c7',
+                        border: '1px solid #fcd34d', borderRadius: 5,
+                        padding: '6px 10px' }}>
+              ❓ {parsedSale.clarifying_question}
+            </p>
+          )}
+
+          {/* customer name */}
+          <label style={labelStyle}>Customer name</label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+            <input
+              value={draft.customer}
+              onChange={(e) => setDraftField('customer', e.target.value)}
+              placeholder="Customer name"
+              style={{ ...fieldStyle, flex: 1,
+                borderColor: nameBlocked ? '#fca5a5' : '#d1d5db' }}
+            />
+            <button
+              onClick={applyWalkIn}
+              title="No customer — fully paid cash sale"
+              style={ghostSmallBtn}
+            >
+              Walk-in (cash)
+            </button>
+          </div>
+
+          {/* items */}
+          {draft.items.map((it) => (
+            <div key={it.key} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+              <input
+                value={it.product}
+                onChange={(e) => setItemField(it.key, 'product', e.target.value)}
+                placeholder="Product"
+                style={{ ...fieldStyle, flex: 2 }}
+              />
+              <input
+                type="number"
+                min="0"
+                value={it.qty}
+                onChange={(e) => setItemField(it.key, 'qty', e.target.value)}
+                placeholder="Qty"
+                style={{ ...fieldStyle, width: 64 }}
+              />
+              <input
+                value={it.unit}
+                onChange={(e) => setItemField(it.key, 'unit', e.target.value)}
+                placeholder="Unit"
+                style={{ ...fieldStyle, width: 60 }}
+              />
+            </div>
+          ))}
+
+          {/* total + paid */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Total (N$)</label>
+              <input
+                type="number"
+                min="0"
+                value={draft.total}
+                onChange={(e) => setDraftField('total', e.target.value)}
+                style={fieldStyle}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Paid (N$)</label>
+              <input
+                type="number"
+                min="0"
+                value={draft.paid}
+                onChange={(e) => setDraftField('paid', e.target.value)}
+                style={fieldStyle}
+              />
+            </div>
+          </div>
+
+          {/* debt preview */}
+          {(() => {
+            const t = Number(draft.total)
+            const p = Number(draft.paid)
+            const owes = t - p
+            if (!isNaN(t) && !isNaN(p) && owes > 0) {
+              return (
+                <p style={{ margin: '6px 0 0', fontSize: 13, color: '#dc2626' }}>
+                  Owes N${owes.toFixed(2)}
+                </p>
+              )
+            }
+            return null
+          })()}
         </div>
       )}
 
-      {/* parsed payment result */}
+      {/* parsed payment result (read-only, no editing needed) */}
       {hasPayment && (
         <div style={{ ...boxStyle, borderColor: '#bbf7d0' }}>
           <SourceBadge label="PARSED PAYMENT" source={parseSource} />
@@ -283,10 +491,12 @@ function MicTest() {
         </div>
       )}
 
-      {/* clarifying question */}
-      {parsedSale?.clarifying_question && (
-        <p style={{ marginTop: 8, fontStyle: 'italic', color: '#555' }}>
-          ❓ {parsedSale.clarifying_question}
+      {/* validation error */}
+      {validationMsg && (
+        <p style={{ margin: '8px 0 0', fontSize: 13, color: '#dc2626',
+                    background: '#fef2f2', border: '1px solid #fca5a5',
+                    borderRadius: 5, padding: '6px 10px' }}>
+          {validationMsg}
         </p>
       )}
 
@@ -294,8 +504,13 @@ function MicTest() {
       {(hasSale || hasPayment) && !saveMsg && (
         <button
           onClick={confirmSave}
-          disabled={saving}
-          style={{ ...btnStyle('#1d4ed8'), marginTop: 10 }}
+          disabled={confirmDisabled}
+          style={{
+            ...btnStyle('#1d4ed8'),
+            marginTop: 10,
+            opacity: confirmDisabled ? 0.5 : 1,
+            cursor: confirmDisabled ? 'not-allowed' : 'pointer',
+          }}
         >
           {saving ? 'Saving…' : '💾 Confirm and save'}
         </button>
@@ -345,9 +560,24 @@ const btnStyle = (bg) => ({
   borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 14,
 })
 
+const ghostSmallBtn = {
+  background: 'none', border: '1px solid #d1d5db', borderRadius: 5,
+  padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: '#374151',
+  whiteSpace: 'nowrap',
+}
+
 const boxStyle = {
   background: '#f8fafc', border: '1px solid #e2e8f0',
   borderRadius: 6, padding: '10px 12px', marginTop: 10,
+}
+
+const fieldStyle = {
+  width: '100%', padding: '5px 8px', fontSize: 13,
+  border: '1px solid #d1d5db', borderRadius: 5, boxSizing: 'border-box',
+}
+
+const labelStyle = {
+  display: 'block', fontSize: 11, color: '#57606a', marginBottom: 2,
 }
 
 export default MicTest
