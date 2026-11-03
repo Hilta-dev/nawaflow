@@ -66,6 +66,7 @@ function App() {
       {tab === 'dashboard' && (
         <Dashboard
           userId={userId}
+          session={session}
           key={refresh}         /* remount on tab switch so data is fresh */
         />
       )}

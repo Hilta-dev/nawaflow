@@ -44,10 +44,13 @@ export async function saveSaleAction(action, userId) {
 
   const unpaid = Math.max(0, saleTotal - salePaid)
 
+  // phone is optional — only write it if the caller supplied a non-empty value
+  const customerPhone = action.phone?.trim() || null
+
   // 1. find or create the customer; read current balance_owed
   const { data: existing, error: findErr } = await supabase
     .from('customers')
-    .select('id, balance_owed')
+    .select('id, balance_owed, phone')
     .eq('user_id', userId)
     .ilike('name', customerName)
     .maybeSingle()
@@ -58,10 +61,19 @@ export async function saveSaleAction(action, userId) {
   if (existing) {
     customerId     = existing.id
     currentBalance = Number(existing.balance_owed ?? 0)
+    // update phone only if a new number was supplied
+    if (customerPhone) {
+      const { error: phoneErr } = await supabase
+        .from('customers')
+        .update({ phone: customerPhone })
+        .eq('id', customerId)
+        .eq('user_id', userId)
+      if (phoneErr) throw new Error('Phone update failed: ' + phoneErr.message)
+    }
   } else {
     const { data: created, error: createErr } = await supabase
       .from('customers')
-      .insert({ user_id: userId, name: customerName, balance_owed: 0 })
+      .insert({ user_id: userId, name: customerName, balance_owed: 0, phone: customerPhone })
       .select('id, balance_owed')
       .single()
     if (createErr) throw new Error('Customer create failed: ' + createErr.message)

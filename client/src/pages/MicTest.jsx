@@ -38,6 +38,7 @@ function makeWav(chunks) {
 function initDraft(action) {
   return {
     customer: action.customer ?? '',
+    phone:    action.phone    ?? '',
     items: (action.items ?? []).map((it, i) => ({
       key: i,
       product: it.product ?? '',
@@ -268,6 +269,7 @@ function MicTest() {
         const editedAction = {
           type:     'record_sale',
           customer: draft.customer.trim(),
+          phone:    draft.phone.trim(),
           total:    Number(draft.total),
           paid:     Number(draft.paid),
           items:    draft.items.map((it) => ({
@@ -422,6 +424,16 @@ function MicTest() {
               Walk-in (cash)
             </button>
           </div>
+
+          {/* customer phone (optional) */}
+          <label style={labelStyle}>Customer phone (optional)</label>
+          <input
+            type="tel"
+            value={draft.phone}
+            onChange={(e) => setDraftField('phone', e.target.value)}
+            placeholder="e.g. 081 234 5678"
+            style={{ ...fieldStyle, marginBottom: 8 }}
+          />
 
           {/* items */}
           {draft.items.map((it) => (

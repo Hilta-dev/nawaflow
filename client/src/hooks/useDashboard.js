@@ -39,7 +39,7 @@ export function useDashboard(userId) {
         // All customers — balance_owed is the maintained running total
         supabase
           .from('customers')
-          .select('id, name, balance_owed')
+          .select('id, name, balance_owed, phone')
           .eq('user_id', userId),
 
         // 5 most recent sales with items
@@ -83,7 +83,7 @@ export function useDashboard(userId) {
       // Debtors: balance_owed > 0, biggest first
       const debtors = customers
         .filter((c) => Number(c.balance_owed ?? 0) > 0)
-        .map((c) => ({ name: c.name, owed: Number(c.balance_owed) }))
+        .map((c) => ({ id: c.id, name: c.name, owed: Number(c.balance_owed), phone: c.phone ?? '' }))
         .sort((a, b) => b.owed - a.owed)
 
       const recentSales = (recentSalesRes.data ?? []).map((t) => ({

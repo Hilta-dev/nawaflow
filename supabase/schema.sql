@@ -110,3 +110,6 @@ create policy "own items delete" on transaction_items for delete
     select 1 from transactions t
     where t.id = transaction_id and t.user_id = auth.uid()
   ));
+
+-- add optional phone number to customers (run once on existing databases)
+alter table customers add column if not exists phone text;
