@@ -170,7 +170,7 @@ function Dashboard({ userId, session }) {
   if (loading) return <p style={msgStyle}>Loading…</p>
   if (error)   return <p style={{ ...msgStyle, color: '#dc2626' }}>Error: {error}</p>
 
-  const { totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments } = data
+  const { totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, customerBalanceMap } = data
 
   // Empty state
   if (totalSales === 0) {
@@ -249,37 +249,50 @@ function Dashboard({ userId, session }) {
         <h4 style={sectionHead}>Recent sales</h4>
         {recentSales.length === 0
           ? <p style={{ fontSize: 13, color: '#6b7280' }}>No sales recorded yet.</p>
-          : recentSales.map((s) => (
-          <div key={s.id} style={saleCard}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <strong>{s.customerName}</strong>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>
-                {new Date(s.createdAt).toLocaleDateString('en-NA')}
-              </span>
-            </div>
-            <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-              {s.items.length > 0
-                ? s.items.map((it) => {
-                    const qty  = it.qty ?? '?'
-                    const name = it.product_name ?? 'item'
-                    const unit = it.unit
-                      ? ` ${qty === 1 ? it.unit : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
-                      : ''
-                    return `${qty}${unit} ${name}`
-                  }).join(', ')
-                : 'No item detail'}
-            </div>
-            <div style={{ marginTop: 4, fontSize: 13 }}>
-              Total: <strong>N${fmt(s.total)}</strong>
-              {' · '}Paid: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
-              {s.total - s.paid > 0 && (
-                <span style={{ color: '#dc2626', marginLeft: 6 }}>
-                  Owes N${fmt(s.total - s.paid)}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
+          : recentSales.map((s) => {
+            const isWalkIn = s.customerName?.toLowerCase() === 'walk-in'
+            const currentBalance = (s.customerId && customerBalanceMap)
+              ? (customerBalanceMap[s.customerId] ?? null)
+              : null
+            return (
+              <div key={s.id} style={saleCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <strong>{s.customerName}</strong>
+                    {!isWalkIn && currentBalance !== null && (
+                      currentBalance <= 0
+                        ? <span style={chipGreen}>Settled ✓</span>
+                        : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 12, color: '#6b7280', flexShrink: 0, marginLeft: 8 }}>
+                    {new Date(s.createdAt).toLocaleDateString('en-NA')}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
+                  {s.items.length > 0
+                    ? s.items.map((it) => {
+                        const qty  = Number(it.qty ?? 0)
+                        const name = it.product_name ?? 'item'
+                        const unit = it.unit
+                          ? ` ${qty === 1 ? it.unit : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
+                          : ''
+                        return `${qty}${unit} ${name}`
+                      }).join(', ')
+                    : 'No item detail'}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13 }}>
+                  Total: <strong>N${fmt(s.total)}</strong>
+                  {' · '}Paid: <strong style={{ color: '#166534' }}>N${fmt(s.paid)}</strong>
+                  {s.total - s.paid > 0 && (
+                    <span style={{ color: '#92400e', marginLeft: 6 }}>
+                      Left unpaid at sale: N${fmt(s.total - s.paid)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
       </section>
 
       {/* recent payments */}
@@ -346,6 +359,14 @@ const waBtn = {
   display: 'inline-block', padding: '6px 12px', fontSize: 13,
   background: '#22c55e', color: '#fff', borderRadius: 6,
   textDecoration: 'none', whiteSpace: 'nowrap', minHeight: 36,
+}
+const chipGreen = {
+  display: 'inline-block', padding: '1px 7px', borderRadius: 10, fontSize: 11,
+  background: '#dcfce7', color: '#166534', fontWeight: 600,
+}
+const chipAmber = {
+  display: 'inline-block', padding: '1px 7px', borderRadius: 10, fontSize: 11,
+  background: '#fef9c3', color: '#854d0e', fontWeight: 600,
 }
 
 export default Dashboard

@@ -9,12 +9,13 @@ import { supabase } from '../lib/supabase'
  *
  * Returns { data, loading, error, refresh }
  * data = {
- *   totalSales:      number   — count of type='sale' transactions
- *   totalOwed:       number   — sum of customers.balance_owed
- *   customerCount:   number   — number of customers
- *   debtors:         [{ name, owed }]  — balance_owed > 0, desc
- *   recentSales:     [{ id, createdAt, customerName, items, total, paid }]
- *   recentPayments:  [{ id, createdAt, customerName, amount }]
+ *   totalSales:        number   — count of type='sale' transactions
+ *   totalOwed:         number   — sum of customers.balance_owed
+ *   customerCount:     number   — number of customers (excludes Walk-in)
+ *   debtors:           [{ id, name, owed, phone }]  — balance_owed > 0, desc
+ *   recentSales:       [{ id, createdAt, customerName, customerId, items, total, paid }]
+ *   recentPayments:    [{ id, createdAt, customerName, amount }]
+ *   customerBalanceMap: { [customerId]: balance_owed }  — for status chips
  * }
  */
 export function useDashboard(userId) {
@@ -50,6 +51,7 @@ export function useDashboard(userId) {
             created_at,
             total,
             paid,
+            customer_id,
             customers ( name ),
             transaction_items ( qty, unit_price, product_name, unit )
           `)
@@ -86,10 +88,17 @@ export function useDashboard(userId) {
         .map((c) => ({ id: c.id, name: c.name, owed: Number(c.balance_owed), phone: c.phone ?? '' }))
         .sort((a, b) => b.owed - a.owed)
 
+      // build a map of customerId → balance_owed for status chips on sale cards
+      const customerBalanceMap = {}
+      for (const c of customers) {
+        customerBalanceMap[c.id] = Number(c.balance_owed ?? 0)
+      }
+
       const recentSales = (recentSalesRes.data ?? []).map((t) => ({
         id:           t.id,
         createdAt:    t.created_at,
         customerName: t.customers?.name ?? 'Unknown',
+        customerId:   t.customer_id ?? null,
         items:        t.transaction_items ?? [],
         total:        t.total ?? 0,
         paid:         t.paid  ?? 0,
@@ -102,7 +111,7 @@ export function useDashboard(userId) {
         amount:       t.total ?? 0,
       }))
 
-      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments })
+      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, customerBalanceMap })
     } catch (err) {
       setError(err.message || 'Failed to load dashboard')
     } finally {
