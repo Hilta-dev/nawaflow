@@ -386,7 +386,7 @@ function MicTest({ session }) {
 
   // ── save ──────────────────────────────────────────────────────────────────
 
-  async function confirmSave() {
+  async function confirmSave(paymentAmountOverride) {
     if (!parsedSale && !paymentDraft) return
 
     if (draft) {
@@ -411,9 +411,12 @@ function MicTest({ session }) {
       }
     }
 
+    const paymentAmount = paymentAmountOverride != null
+      ? paymentAmountOverride
+      : (paymentDraft ? Number(paymentDraft.amount) : null)
+
     if (paymentDraft) {
-      const amt = Number(paymentDraft.amount)
-      if (!amt || amt <= 0) {
+      if (!paymentAmount || paymentAmount <= 0) {
         setValidationMsg('Payment amount must be greater than zero.')
         return
       }
@@ -480,7 +483,7 @@ function MicTest({ session }) {
 
       if (paymentDraft) {
         await savePaymentAction(
-          { customer: paymentDraft.customer, amount: Number(paymentDraft.amount) },
+          { customer: paymentDraft.customer, amount: paymentAmount },
           user.id
         )
       }
@@ -507,8 +510,8 @@ function MicTest({ session }) {
   const paymentOverpaid       = paymentDraft && paymentDraft.balance > 0 &&
     Number(paymentDraft.amount) > paymentDraft.balance
   const confirmDisabled       = saving || nameBlocked || hasClarifyingQuestion ||
-    (paymentDraft && (!Number(paymentDraft.amount) || Number(paymentDraft.amount) <= 0)) ||
-    paymentOverpaid
+    (paymentDraft && !paymentOverpaid &&
+      (!Number(paymentDraft.amount) || Number(paymentDraft.amount) <= 0))
 
   const fmtCurrency = (n) => `N$${Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -775,22 +778,13 @@ function MicTest({ session }) {
                 style={{ ...fieldStyle, marginBottom: 4 }}
               />
 
-              {/* overpayment warning + fix button */}
-              {Number(paymentDraft.amount) > paymentDraft.balance && (
-                <div style={{ margin: '4px 0 0', background: '#fef3c7',
-                              border: '1px solid #fcd34d', borderRadius: 6, padding: '7px 8px' }}>
-                  <p style={{ margin: '0 0 6px', fontSize: 12, color: '#92400e' }}>
-                    This is more than the balance owed. Please correct the amount.
-                  </p>
-                  <button
-                    onClick={() => setPaymentDraft((d) => ({
-                      ...d, amount: String(d.balance), amountLabel: 'full balance',
-                    }))}
-                    style={{ ...btnStyle('#92400e'), fontSize: 12, padding: '5px 10px', minHeight: 0 }}
-                  >
-                    Pay the full balance (N${paymentDraft.balance.toFixed(2)})
-                  </button>
-                </div>
+              {/* overpayment: change message */}
+              {paymentOverpaid && (
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#166534',
+                            background: '#dcfce7', border: '1px solid #bbf7d0',
+                            borderRadius: 6, padding: '6px 10px' }}>
+                  {paymentDraft.customer} owes N${paymentDraft.balance.toFixed(2)}. You received N${Number(paymentDraft.amount).toFixed(2)}. Record N${paymentDraft.balance.toFixed(2)} and give back N${(Number(paymentDraft.amount) - paymentDraft.balance).toFixed(2)} change.
+                </p>
               )}
             </>
           )}
@@ -830,32 +824,38 @@ function MicTest({ session }) {
         </div>
       )}
 
-      {/* confirm + save */}
+      {/* confirm + save (or overpayment record button, or nothing when zero balance) */}
       {(hasSale || paymentDraft) && !saveMsg && !dupWarning && (
-        <button
-          onClick={confirmSave}
-          disabled={confirmDisabled}
-          style={{
-            ...btnStyle('#16a34a'),
-            marginTop: 12,
-            width: '100%',
-            minHeight: 44,
-            opacity: confirmDisabled ? 0.5 : 1,
-            cursor: confirmDisabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? 'Saving…' : '💾 Confirm and save'}
-        </button>
-      )}
-
-      {/* cancel */}
-      {(hasSale || paymentDraft) && !saveMsg && !dupWarning && (
-        <button
-          onClick={resetResult}
-          style={{ ...btnStyle('#6b7280'), marginTop: 8, width: '100%', minHeight: 44 }}
-        >
-          Cancel
-        </button>
+        <>
+          {/* zero balance: hide save, show only cancel */}
+          {!(paymentDraft && !hasSale && paymentDraft.balance <= 0) && (
+            <button
+              onClick={paymentOverpaid
+                ? () => confirmSave(paymentDraft.balance)
+                : confirmSave
+              }
+              disabled={confirmDisabled}
+              style={{
+                ...btnStyle('#16a34a'),
+                marginTop: 12,
+                width: '100%',
+                minHeight: 44,
+                opacity: confirmDisabled ? 0.5 : 1,
+                cursor: confirmDisabled ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {saving ? 'Saving…' : paymentOverpaid
+                ? `💾 Record N$${paymentDraft.balance.toFixed(2)} payment`
+                : '💾 Confirm and save'}
+            </button>
+          )}
+          <button
+            onClick={resetResult}
+            style={{ ...btnStyle('#6b7280'), marginTop: 8, width: '100%', minHeight: 44 }}
+          >
+            Cancel
+          </button>
+        </>
       )}
 
       {/* save result */}
