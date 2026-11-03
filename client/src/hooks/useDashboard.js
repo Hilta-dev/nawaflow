@@ -88,10 +88,12 @@ export function useDashboard(userId) {
         .map((c) => ({ id: c.id, name: c.name, owed: Number(c.balance_owed), phone: c.phone ?? '' }))
         .sort((a, b) => b.owed - a.owed)
 
-      // build a map of customerId → balance_owed for status chips on sale cards
+      // build maps of customerId → balance_owed and → phone for cards
       const customerBalanceMap = {}
+      const customerPhoneMap   = {}
       for (const c of customers) {
         customerBalanceMap[c.id] = Number(c.balance_owed ?? 0)
+        customerPhoneMap[c.id]   = c.phone ?? ''
       }
 
       const recentSales = (recentSalesRes.data ?? []).map((t) => ({
@@ -118,7 +120,7 @@ export function useDashboard(userId) {
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 30)
 
-      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, recentActivity, customerBalanceMap })
+      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, recentActivity, customerBalanceMap, customerPhoneMap })
     } catch (err) {
       setError(err.message || 'Failed to load dashboard')
     } finally {

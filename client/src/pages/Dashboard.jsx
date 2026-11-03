@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useDashboard } from '../hooks/useDashboard'
 import { isValidPhone, normalisePhone, formatPhone, buildContactUrls } from '../lib/phone'
+import { buildSaleReceiptText, buildPaymentReceiptText } from '../lib/receipt'
+import ReceiptCard from '../components/ReceiptCard'
 
 function fmt(n) {
   return Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -88,6 +90,8 @@ function Dashboard({ userId, session }) {
   const [phoneMap,       setPhoneMap]       = useState({})
   const [showAllDebtors, setShowAllDebtors] = useState(false)
   const [showAllActivity,setShowAllActivity]= useState(false)
+  // receiptState: { itemId, text, phone } — shown inline under that activity card
+  const [receiptState,   setReceiptState]   = useState(null)
 
   function getPhone(debtor) {
     return phoneMap[debtor.id] !== undefined ? phoneMap[debtor.id] : debtor.phone
@@ -102,7 +106,7 @@ function Dashboard({ userId, session }) {
   if (loading) return <p style={msgStyle}>Loading…</p>
   if (error)   return <p style={{ ...msgStyle, color: '#dc2626' }}>Error: {error}</p>
 
-  const { totalSales, totalOwed, customerCount, debtors, recentActivity, customerBalanceMap } = data
+  const { totalSales, totalOwed, customerCount, debtors, recentActivity, customerBalanceMap, customerPhoneMap } = data
 
   // Empty state
   if (totalSales === 0) {
@@ -216,19 +220,50 @@ function Dashboard({ userId, session }) {
         )}
 
         {visibleActivity.map((item) => {
+          const itemKey       = `${item.kind}-${item.id}`
+          const isReceiptOpen = receiptState?.itemId === itemKey
+          const custPhone     = item.customerId ? (customerPhoneMap?.[item.customerId] ?? '') : ''
+
           if (item.kind === 'payment') {
+            const currentBalance = item.customerId
+              ? (customerBalanceMap?.[item.customerId] ?? 0)
+              : 0
+            const receiptText = buildPaymentReceiptText({
+              shopName,
+              date:         item.createdAt,
+              customerName: item.customerName,
+              amount:       item.amount,
+              balance:      currentBalance,
+            })
             return (
-              <div key={`pay-${item.id}`} style={{ ...saleCard, borderColor: '#bbf7d0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13 }}>
-                    <span style={chipGreen}>Payment</span>{' '}
-                    <strong>{item.customerName}</strong>{' paid '}
-                    <strong style={{ color: '#166534' }}>N${fmt(item.amount)}</strong>
-                  </span>
-                  <span style={{ fontSize: 12, color: '#6b7280', flexShrink: 0, marginLeft: 8 }}>
-                    {new Date(item.createdAt).toLocaleDateString('en-NA')}
-                  </span>
+              <div key={itemKey}>
+                <div style={{ ...saleCard, borderColor: '#bbf7d0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13 }}>
+                      <span style={chipGreen}>Payment</span>{' '}
+                      <strong>{item.customerName}</strong>{' paid '}
+                      <strong style={{ color: '#166534' }}>N${fmt(item.amount)}</strong>
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>
+                        {new Date(item.createdAt).toLocaleDateString('en-NA')}
+                      </span>
+                      <button
+                        onClick={() => setReceiptState(isReceiptOpen ? null : { itemId: itemKey, text: receiptText, phone: custPhone })}
+                        style={receiptBtn}
+                      >
+                        Receipt
+                      </button>
+                    </div>
+                  </div>
                 </div>
+                {isReceiptOpen && (
+                  <ReceiptCard
+                    text={receiptState.text}
+                    phone={receiptState.phone}
+                    onDone={() => setReceiptState(null)}
+                  />
+                )}
               </div>
             )
           }
@@ -238,44 +273,70 @@ function Dashboard({ userId, session }) {
           const currentBalance = (item.customerId && customerBalanceMap)
             ? (customerBalanceMap[item.customerId] ?? null)
             : null
+          const receiptText = buildSaleReceiptText({
+            shopName,
+            date:         item.createdAt,
+            customerName: item.customerName,
+            items:        item.items,
+            total:        item.total,
+            paid:         item.paid,
+            balance:      currentBalance ?? 0,
+          })
           return (
-            <div key={`sale-${item.id}`} style={saleCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <strong>{item.customerName}</strong>
-                  {!isWalkIn && currentBalance !== null && (
-                    currentBalance <= 0
-                      ? <span style={chipGreen}>Settled ✓</span>
-                      : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
+            <div key={itemKey}>
+              <div style={saleCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <strong>{item.customerName}</strong>
+                    {!isWalkIn && currentBalance !== null && (
+                      currentBalance <= 0
+                        ? <span style={chipGreen}>Settled ✓</span>
+                        : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                    <span style={{ fontSize: 12, color: '#6b7280' }}>
+                      {new Date(item.createdAt).toLocaleDateString('en-NA')}
+                    </span>
+                    <button
+                      onClick={() => setReceiptState(isReceiptOpen ? null : { itemId: itemKey, text: receiptText, phone: custPhone })}
+                      style={receiptBtn}
+                    >
+                      Receipt
+                    </button>
+                  </div>
+                </div>
+                <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
+                  {item.items.length > 0
+                    ? item.items.map((it) => {
+                        const qty  = Number(it.qty ?? 0)
+                        const name = it.product_name ?? 'item'
+                        const unit = it.unit
+                          ? ` ${qty <= 1
+                              ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
+                              : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
+                          : ''
+                        return `${qty}${unit} ${name}`
+                      }).join(', ')
+                    : 'No item detail'}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13 }}>
+                  Total: <strong>N${fmt(item.total)}</strong>
+                  {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(item.paid)}</strong>
+                  {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
+                    <span style={{ color: '#92400e', marginLeft: 6 }}>
+                      Still unpaid: N${fmt(currentBalance)}
+                    </span>
                   )}
                 </div>
-                <span style={{ fontSize: 12, color: '#6b7280', flexShrink: 0, marginLeft: 8 }}>
-                  {new Date(item.createdAt).toLocaleDateString('en-NA')}
-                </span>
               </div>
-              <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-                {item.items.length > 0
-                  ? item.items.map((it) => {
-                      const qty  = Number(it.qty ?? 0)
-                      const name = it.product_name ?? 'item'
-                      const unit = it.unit
-                        ? ` ${qty <= 1
-                            ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
-                            : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
-                        : ''
-                      return `${qty}${unit} ${name}`
-                    }).join(', ')
-                  : 'No item detail'}
-              </div>
-              <div style={{ marginTop: 4, fontSize: 13 }}>
-                Total: <strong>N${fmt(item.total)}</strong>
-                {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(item.paid)}</strong>
-                {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
-                  <span style={{ color: '#92400e', marginLeft: 6 }}>
-                    Still unpaid: N${fmt(currentBalance)}
-                  </span>
-                )}
-              </div>
+              {isReceiptOpen && (
+                <ReceiptCard
+                  text={receiptState.text}
+                  phone={receiptState.phone}
+                  onDone={() => setReceiptState(null)}
+                />
+              )}
             </div>
           )
         })}
@@ -304,6 +365,11 @@ function StatCard({ label, value }) {
 }
 
 // ─── styles ───────────────────────────────────────────────────────────────────
+const receiptBtn = {
+  background: '#e0f2fe', color: '#0369a1', border: 'none',
+  borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer',
+  minHeight: 44, fontWeight: 500,
+}
 const wrapStyle   = { padding: '16px 16px 8px' }
 const msgStyle    = { padding: 24 }
 const sectionHead = { margin: '0 0 8px', fontSize: 11, fontWeight: 700,

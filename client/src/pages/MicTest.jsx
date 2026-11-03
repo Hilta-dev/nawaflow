@@ -3,6 +3,8 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
 import { saveSaleAction, savePaymentAction } from '../lib/saveSale'
 import { isValidPhone, normalisePhone } from '../lib/phone'
+import { buildSaleReceiptText, buildPaymentReceiptText } from '../lib/receipt'
+import ReceiptCard from '../components/ReceiptCard'
 
 const PHONE_INVALID_MSG =
   'That number does not look right. Namibian mobile numbers look like 081 234 5678.'
@@ -232,11 +234,12 @@ function MicTest({ session }) {
   const [customerMatches, setCustomerMatches] = useState(null) // null = not in pick state
 
   //save state
-  const [saving,      setSaving]      = useState(false)
-  const [saveMsg,     setSaveMsg]     = useState('')
+  const [saving,        setSaving]        = useState(false)
+  const [saveError,     setSaveError]     = useState('')
   const [validationMsg, setValidationMsg] = useState('')
-  const [dupWarning,  setDupWarning]  = useState(false)
-  const forceSaveRef  = useRef(false)
+  const [dupWarning,    setDupWarning]    = useState(false)
+  const forceSaveRef    = useRef(false)
+  const [receiptData,   setReceiptData]   = useState(null) // {text, phone} after save
 
   // ── load all customers once for matching ──────────────────────────────────
   const [myCustomers, setMyCustomers] = useState([])
@@ -283,6 +286,8 @@ function MicTest({ session }) {
     setCustomerMatches(null)
     setDupWarning(false)
     forceSaveRef.current = false
+    setReceiptData(null)
+    setSaveError('')
   }
 
   //begin recording
@@ -431,11 +436,14 @@ function MicTest({ session }) {
     }
 
     setSaving(true)
-    setSaveMsg('')
+    setSaveError('')
     setValidationMsg('')
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not signed in')
+
+      let savedDraftAction = null
+      let savedPaymentAmount = null
 
       if (draft) {
         const editedAction = {
@@ -487,6 +495,7 @@ function MicTest({ session }) {
         forceSaveRef.current = false
 
         await saveSaleAction(editedAction, user.id)
+        savedDraftAction = editedAction
       }
 
       if (paymentDraft) {
@@ -494,14 +503,57 @@ function MicTest({ session }) {
           { customer: paymentDraft.customer, amount: paymentAmount },
           user.id
         )
+        savedPaymentAmount = paymentAmount
       }
 
-      setSaveMsg('✓ Saved')
+      // ── build receipt after all saves succeeded ──────────────────────────
+      // Re-fetch the customer's current balance so the receipt is accurate.
+      const receiptCustomerName = savedDraftAction?.customer ?? paymentDraft?.customer ?? ''
+      let   receiptPhone        = savedDraftAction?.phone ?? ''
+      let   newBalance          = 0
+
+      if (receiptCustomerName && receiptCustomerName.toLowerCase() !== 'walk-in') {
+        const { data: cust } = await supabase
+          .from('customers')
+          .select('balance_owed, phone')
+          .eq('user_id', user.id)
+          .ilike('name', receiptCustomerName)
+          .maybeSingle()
+        if (cust) {
+          newBalance   = Number(cust.balance_owed ?? 0)
+          if (!receiptPhone) receiptPhone = cust.phone ?? ''
+        }
+      }
+
+      let receiptText
+      if (savedDraftAction) {
+        receiptText = buildSaleReceiptText({
+          shopName:     shopName,
+          date:         new Date().toISOString(),
+          customerName: savedDraftAction.customer,
+          items:        savedDraftAction.items.map((it) => ({
+            qty: it.qty, unit: it.unit, product_name: it.product,
+          })),
+          total:   savedDraftAction.total,
+          paid:    savedDraftAction.paid,
+          balance: newBalance,
+        })
+      } else {
+        receiptText = buildPaymentReceiptText({
+          shopName:     shopName,
+          date:         new Date().toISOString(),
+          customerName: paymentDraft.customer,
+          amount:       savedPaymentAmount,
+          balance:      newBalance,
+        })
+      }
+
       setParsedSale(null)
       setDraft(null)
       setPaymentDraft(null)
+      setReceiptData({ text: receiptText, phone: receiptPhone })
     } catch (err) {
-      setSaveMsg('Save failed: ' + err.message)
+      setSaveError('Save failed: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -848,7 +900,7 @@ function MicTest({ session }) {
       )}
 
       {/* confirm + save (or overpayment record button, or nothing when zero balance) */}
-      {(hasSale || paymentDraft) && !saveMsg && !dupWarning && (
+      {(hasSale || paymentDraft) && !receiptData && !dupWarning && (
         <>
           {/* zero balance: hide save, show only cancel */}
           {!(paymentDraft && !hasSale && paymentDraft.balance <= 0) && (
@@ -881,14 +933,20 @@ function MicTest({ session }) {
         </>
       )}
 
-      {/* save result */}
-      {saveMsg && (
-        <p style={{
-          margin: '10px 0 0', fontWeight: 600, fontSize: 15,
-          color: saveMsg.startsWith('✓') ? '#166534' : '#dc2626',
-        }}>
-          {saveMsg}
+      {/* save error */}
+      {saveError && (
+        <p style={{ margin: '10px 0 0', fontWeight: 600, fontSize: 15, color: '#dc2626' }}>
+          {saveError}
         </p>
+      )}
+
+      {/* receipt card after successful save */}
+      {receiptData && (
+        <ReceiptCard
+          text={receiptData.text}
+          phone={receiptData.phone}
+          onDone={resetResult}
+        />
       )}
 
       {/* playback */}
