@@ -1,57 +1,40 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useDashboard } from '../hooks/useDashboard'
+import { isValidPhone, normalisePhone, formatPhone, buildContactUrls } from '../lib/phone'
 
 function fmt(n) {
   return Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-/**
- * normalisePhone(raw)
- *
- * Namibian number rules:
- *   - Remove spaces and dashes
- *   - If it already starts with +264 or 264, strip leading + and return as-is
- *   - If it starts with 0, remove the leading 0 and prepend 264
- *   - Otherwise just prepend 264
- *
- * e.g.  081 234 5678   →  264812345678
- *       +264812345678  →  264812345678
- */
-function normalisePhone(raw) {
-  if (!raw) return ''
-  const clean = raw.replace(/[\s\-]/g, '')
-  if (clean.startsWith('+264')) return clean.slice(1)       // +264... → 264...
-  if (clean.startsWith('264'))  return clean                 // already correct
-  if (clean.startsWith('0'))    return '264' + clean.slice(1) // 0... → 264...
-  return '264' + clean
-}
-
-function buildWaUrl(phone, name, owed, shopName) {
-  const number = normalisePhone(phone)
-  const shop   = shopName?.trim() || 'Nawa'
-  const text   = `Hi ${name}, a friendly reminder that you owe N$${fmt(owed)} to ${shop}. Thank you!`
-  return `https://wa.me/${number}?text=${encodeURIComponent(text)}`
-}
+const PHONE_INVALID_MSG =
+  'That number does not look right. Namibian mobile numbers look like 081 234 5678.'
 
 // ── inline phone editor for a single debtor card ──────────────────────────────
 
 function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
   const [editing, setEditing] = useState(false)
-  const [value,   setValue]   = useState(currentPhone)
+  const [value,   setValue]   = useState(currentPhone ?? '')
   const [saving,  setSaving]  = useState(false)
 
+  const kind    = isValidPhone(value)
+  const invalid = kind === 'invalid'
+  const canSave = !saving && !invalid
+
   async function save() {
+    if (invalid) return
     setSaving(true)
+    // Store normalised (+264...) or empty
+    const stored = normalisePhone(value) || (value.trim() ? value.trim() : null)
     const { error } = await supabase
       .from('customers')
-      .update({ phone: value.trim() || null })
+      .update({ phone: stored || null })
       .eq('id', debtorId)
       .eq('user_id', userId)
     setSaving(false)
     if (!error) {
       setEditing(false)
-      onSaved(value.trim())
+      onSaved(stored || '')
     }
   }
 
@@ -64,22 +47,37 @@ function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
   }
 
   return (
-    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="e.g. 081 234 5678"
-        style={{ padding: '6px 8px', fontSize: 13, border: '1px solid #d1d5db',
-                 borderRadius: 6, width: 140, minHeight: 36 }}
-        autoFocus
-      />
-      <button onClick={save} disabled={saving} style={smallBtn('#166534')}>
-        {saving ? '…' : 'Save'}
-      </button>
-      <button onClick={() => { setValue(currentPhone); setEditing(false) }} style={smallBtn('#6b7280')}>
-        ✕
-      </button>
-    </span>
+    <div style={{ marginTop: 4 }}>
+      <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="e.g. 081 234 5678"
+          style={{ padding: '6px 8px', fontSize: 13,
+                   border: `1px solid ${invalid ? '#fca5a5' : '#d1d5db'}`,
+                   borderRadius: 6, width: 148, minHeight: 44 }}
+          autoFocus
+        />
+        <button onClick={save} disabled={!canSave}
+          style={{ ...smallBtn('#166534'), minHeight: 44, opacity: canSave ? 1 : 0.5 }}>
+          {saving ? '…' : 'Save'}
+        </button>
+        <button onClick={() => { setValue(currentPhone ?? ''); setEditing(false) }}
+          style={{ ...smallBtn('#6b7280'), minHeight: 44 }}>
+          Cancel
+        </button>
+      </div>
+      {invalid && (
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: '#dc2626' }}>
+          {PHONE_INVALID_MSG}
+        </p>
+      )}
+      {kind === 'landline' && (
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: '#92400e' }}>
+          Landline. WhatsApp may not work.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -207,7 +205,12 @@ function Dashboard({ userId, session }) {
           <h4 style={sectionHead}>Who owes you money</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {debtors.map((d) => {
-              const phone = getPhone(d)
+              const phone   = getPhone(d)
+              const kind    = isValidPhone(phone)
+              const urls    = (kind === 'mobile' || kind === 'landline' || kind === 'international')
+                ? buildContactUrls(phone, d.name, d.owed, shopName)
+                : null
+              const display = phone ? formatPhone(phone) : null
               return (
                 <div key={d.id} style={debtorCard}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -216,9 +219,24 @@ function Dashboard({ userId, session }) {
                       N${fmt(d.owed)}
                     </span>
                   </div>
-                  <p style={{ margin: '2px 0 8px', fontSize: 12, color: '#6b7280' }}>
-                    {phone || 'No number saved'}
+
+                  {/* phone display line */}
+                  <p style={{ margin: '2px 0 6px', fontSize: 12, color: '#6b7280' }}>
+                    {!phone && 'No number saved'}
+                    {phone && kind === 'invalid' && (
+                      <span style={{ color: '#dc2626' }}>
+                        Number needs fixing.{' '}
+                      </span>
+                    )}
+                    {phone && kind !== 'invalid' && display}
+                    {phone && kind === 'landline' && (
+                      <span style={{ marginLeft: 6, color: '#92400e' }}>
+                        Landline. WhatsApp may not work.
+                      </span>
+                    )}
                   </p>
+
+                  {/* contact buttons */}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <PhoneEditor
                       debtorId={d.id}
@@ -226,17 +244,25 @@ function Dashboard({ userId, session }) {
                       currentPhone={phone}
                       onSaved={(p) => handlePhoneSaved(d.id, p)}
                     />
-                    {phone && (
-                      <a
-                        href={buildWaUrl(phone, d.name, d.owed, shopName)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={waBtn}
-                      >
-                        WhatsApp
-                      </a>
+                    {urls && (
+                      <>
+                        <a href={urls.wa} target="_blank" rel="noopener noreferrer" style={waBtn}>
+                          WhatsApp
+                        </a>
+                        <a href={urls.sms} style={smsBtn}>
+                          SMS
+                        </a>
+                        <a href={urls.tel} style={callBtn}>
+                          Call
+                        </a>
+                      </>
                     )}
                   </div>
+                  {urls && (
+                    <p style={{ margin: '6px 0 0', fontSize: 11, color: '#9ca3af' }}>
+                      If WhatsApp does not open, tap SMS.
+                    </p>
+                  )}
                 </div>
               )
             })}
@@ -360,7 +386,20 @@ const smallLinkBtn = {
 const waBtn = {
   display: 'inline-block', padding: '6px 12px', fontSize: 13,
   background: '#22c55e', color: '#fff', borderRadius: 6,
-  textDecoration: 'none', whiteSpace: 'nowrap', minHeight: 36,
+  textDecoration: 'none', whiteSpace: 'nowrap', minHeight: 44,
+  lineHeight: '30px',
+}
+const smsBtn = {
+  display: 'inline-block', padding: '6px 12px', fontSize: 13,
+  background: '#3b82f6', color: '#fff', borderRadius: 6,
+  textDecoration: 'none', whiteSpace: 'nowrap', minHeight: 44,
+  lineHeight: '30px',
+}
+const callBtn = {
+  display: 'inline-block', padding: '6px 12px', fontSize: 13,
+  background: '#6b7280', color: '#fff', borderRadius: 6,
+  textDecoration: 'none', whiteSpace: 'nowrap', minHeight: 44,
+  lineHeight: '30px',
 }
 const chipGreen = {
   display: 'inline-block', padding: '1px 7px', borderRadius: 10, fontSize: 11,

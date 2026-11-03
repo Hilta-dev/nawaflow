@@ -2,6 +2,10 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
 import { saveSaleAction, savePaymentAction } from '../lib/saveSale'
+import { isValidPhone, normalisePhone } from '../lib/phone'
+
+const PHONE_INVALID_MSG =
+  'That number does not look right. Namibian mobile numbers look like 081 234 5678.'
 
 // ─── payment draft helpers ────────────────────────────────────────────────────
 
@@ -95,6 +99,10 @@ function validateDraft(draft) {
     if (!it.qty.trim() || isNaN(qty) || qty <= 0) {
       return `Quantity for "${it.product || 'item'}" must be greater than 0.`
     }
+  }
+  // Phone is optional — only validate if something was typed
+  if (draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid') {
+    return PHONE_INVALID_MSG
   }
   return ''
 }
@@ -433,7 +441,7 @@ function MicTest({ session }) {
         const editedAction = {
           type:     'record_sale',
           customer: draft.customer.trim(),
-          phone:    draft.phone.trim(),
+          phone:    normalisePhone(draft.phone) || (draft.phone?.trim() || ''),
           total:    Number(draft.total),
           paid:     Number(draft.paid),
           items:    draft.items.map((it) => ({
@@ -641,8 +649,23 @@ function MicTest({ session }) {
             value={draft.phone}
             onChange={(e) => setDraftField('phone', e.target.value)}
             placeholder="e.g. 081 234 5678"
-            style={{ ...fieldStyle, marginBottom: 8 }}
+            style={{
+              ...fieldStyle,
+              marginBottom: draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid' ? 2 : 8,
+              borderColor: draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid'
+                ? '#fca5a5' : '#d1d5db',
+            }}
           />
+          {draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid' && (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#dc2626' }}>
+              {PHONE_INVALID_MSG}
+            </p>
+          )}
+          {draft.phone?.trim() && isValidPhone(draft.phone) === 'landline' && (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#92400e' }}>
+              Landline. WhatsApp may not work.
+            </p>
+          )}
 
           {/* items */}
           {draft.items.map((it) => (
