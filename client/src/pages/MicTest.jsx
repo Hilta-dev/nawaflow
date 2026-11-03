@@ -181,13 +181,20 @@ function MicTest() {
       catch { throw new Error(`Server returned non-JSON (status ${res.status})`) }
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`)
       setParseSource(data.source || '')
-      if (!data.actions?.length && data.clarifying_question) {
+      const actions    = data.actions ?? []
+      const saleAction = actions.find((a) => a.type === 'record_sale')
+      const payAction  = actions.find((a) => a.type === 'record_payment')
+
+      if (saleAction || payAction) {
+        // we have at least one actionable result — show the review card
+        setParsedSale(data)
+        if (saleAction) setDraft(initDraft(saleAction))
+      } else if (data.clarifying_question) {
+        // parser needs more info — show the question
         setParseError(data.clarifying_question)
       } else {
-        setParsedSale(data)
-        // initialise editable draft for sale actions
-        const saleAction = data.actions?.find((a) => a.type === 'record_sale')
-        if (saleAction) setDraft(initDraft(saleAction))
+        // no actions and no clarifying question — show a generic fallback
+        setParseError("Couldn't understand that sale. Please try rephrasing.")
       }
     } catch (err) {
       setParseError(err.message)
