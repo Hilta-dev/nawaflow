@@ -17,26 +17,41 @@ function StockChip({ qty, lowLevel }) {
 
 // ── add / edit product form ───────────────────────────────────────────────────
 
+const UNIT_OPTIONS = ['piece', 'bag', 'packet', 'box', 'bottle', 'loaf', 'dozen', 'kg', 'g', 'litre', 'ml', 'Other']
+
+function resolveUnitSelect(savedUnit) {
+  if (!savedUnit) return { select: 'piece', custom: '' }
+  if (UNIT_OPTIONS.slice(0, -1).includes(savedUnit)) return { select: savedUnit, custom: '' }
+  return { select: 'Other', custom: savedUnit }
+}
+
 function ProductForm({ userId, existing, allNames, onSaved, onCancel }) {
   const isEdit = !!existing
 
+  const initUnit = resolveUnitSelect(existing?.unit ?? '')
   const [name,        setName]        = useState(existing?.name         ?? '')
-  const [unit,        setUnit]        = useState(existing?.unit         ?? 'item')
+  const [unitSelect,  setUnitSelect]  = useState(initUnit.select || 'piece')
+  const [customUnit,  setCustomUnit]  = useState(initUnit.custom)
   const [price,       setPrice]       = useState(existing?.price        != null ? String(existing.price)      : '')
   const [costPrice,   setCostPrice]   = useState(existing?.cost_price   != null ? String(existing.cost_price) : '')
   const [stockQty,    setStockQty]    = useState(existing?.stock_qty    != null ? String(existing.stock_qty)  : '0')
-  const [lowLevel,    setLowLevel]    = useState(existing?.low_stock_level != null ? String(existing.low_stock_level) : '0')
+  const [lowLevel,    setLowLevel]    = useState(existing?.low_stock_level != null ? String(existing.low_stock_level) : '5')
   const [saving,      setSaving]      = useState(false)
   const [err,         setErr]         = useState('')
 
+  const resolvedUnit = unitSelect === 'Other' ? customUnit.trim() : unitSelect
+
   function validate() {
     if (!name.trim()) return 'Product name is required.'
-    // duplicate check (case-insensitive), excluding the product being edited
     const lower = name.trim().toLowerCase()
     const dup = allNames.some((n) =>
       n.toLowerCase() === lower && n.toLowerCase() !== (existing?.name ?? '').toLowerCase()
     )
     if (dup) return `You already have a product called "${name.trim()}".`
+    if (unitSelect === 'Other') {
+      if (!customUnit.trim()) return 'Please enter a custom unit.'
+      if (/\d/.test(customUnit.trim())) return 'The unit must be one word with no numbers.'
+    }
     if (price !== '' && (isNaN(Number(price)) || Number(price) < 0))
       return 'Selling price must be 0 or more.'
     if (costPrice !== '' && (isNaN(Number(costPrice)) || Number(costPrice) < 0))
@@ -55,7 +70,7 @@ function ProductForm({ userId, existing, allNames, onSaved, onCancel }) {
     setErr('')
     const payload = {
       name:            name.trim(),
-      unit:            unit.trim() || 'item',
+      unit:            resolvedUnit || 'piece',
       price:           price !== '' ? Number(price) : null,
       cost_price:      costPrice !== '' ? Number(costPrice) : null,
       stock_qty:       Number(stockQty),
@@ -86,21 +101,40 @@ function ProductForm({ userId, existing, allNames, onSaved, onCancel }) {
       <input
         value={name}
         onChange={(e) => { setName(e.target.value); setErr('') }}
-        placeholder="e.g. Sugar"
+        placeholder="e.g. Rice 5kg"
         style={{ ...fieldStyle, borderColor: !name.trim() && err ? '#fca5a5' : '#d1d5db' }}
       />
+      <p style={helpText}>Put the size in the name if you sell different sizes.</p>
 
       <label style={labelStyle}>Unit</label>
-      <input
-        value={unit}
-        onChange={(e) => setUnit(e.target.value)}
-        placeholder="e.g. bag, kg, bottle"
+      <select
+        value={unitSelect}
+        onChange={(e) => { setUnitSelect(e.target.value); setCustomUnit(''); setErr('') }}
         style={fieldStyle}
-      />
+      >
+        {UNIT_OPTIONS.map((u) => (
+          <option key={u} value={u}>{u}</option>
+        ))}
+      </select>
+      {unitSelect === 'Other' && (
+        <>
+          <input
+            value={customUnit}
+            onChange={(e) => { setCustomUnit(e.target.value); setErr('') }}
+            placeholder="One word, no numbers"
+            style={{ ...fieldStyle, borderColor: /\d/.test(customUnit) ? '#fca5a5' : '#d1d5db' }}
+          />
+          {/\d/.test(customUnit) && (
+            <p style={{ ...errStyle, marginTop: 0, marginBottom: 8 }}>
+              The unit must be one word with no numbers.
+            </p>
+          )}
+        </>
+      )}
 
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
-          <label style={labelStyle}>Selling price (N$)</label>
+          <label style={labelStyle}>Selling price for one (N$)</label>
           <input type="number" min="0" step="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
@@ -109,19 +143,20 @@ function ProductForm({ userId, existing, allNames, onSaved, onCancel }) {
           />
         </div>
         <div style={{ flex: 1 }}>
-          <label style={labelStyle}>Cost price (N$, optional)</label>
+          <label style={labelStyle}>Cost price for one (N$, optional)</label>
           <input type="number" min="0" step="0.01"
             value={costPrice}
             onChange={(e) => setCostPrice(e.target.value)}
             placeholder="0.00"
             style={fieldStyle}
           />
+          <p style={helpText}>What you paid for one. Needed to see your profit.</p>
         </div>
       </div>
 
       {!isEdit && (
         <>
-          <label style={labelStyle}>Starting quantity</label>
+          <label style={labelStyle}>How many do you have now?</label>
           <input type="number" min="0" step="any"
             value={stockQty}
             onChange={(e) => setStockQty(e.target.value)}
@@ -130,7 +165,7 @@ function ProductForm({ userId, existing, allNames, onSaved, onCancel }) {
         </>
       )}
 
-      <label style={labelStyle}>Low stock alert level</label>
+      <label style={labelStyle}>Warn me when I have this many or fewer</label>
       <input type="number" min="0" step="any"
         value={lowLevel}
         onChange={(e) => setLowLevel(e.target.value)}
@@ -364,6 +399,9 @@ const fieldStyle = {
 }
 const labelStyle = {
   display: 'block', fontSize: 11, color: '#6b7280', marginBottom: 2,
+}
+const helpText = {
+  margin: '0 0 8px', fontSize: 11, color: '#9ca3af',
 }
 const errStyle = {
   fontSize: 12, color: '#dc2626', background: '#fef2f2',
