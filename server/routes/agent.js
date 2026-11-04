@@ -14,8 +14,8 @@ router.post('/parse', async (req, res) => {
     res.json(result);
   } catch (err) {
     //log status + message; never log keys or audio content
-    console.error('[agent/parse] error status=502 message=%s', err.message);
-    res.status(502).json({ error: 'Could not understand that. Please try again.' });
+    console.error('[agent/parse] error status=%s message=%s', err.status ?? 503, err.message);
+    res.status(503).json({ error: 'Nawa could not reach the AI just now. Please try again.' });
   }
 });
 
