@@ -99,11 +99,11 @@ export async function saveSaleAction(action, userId) {
   // 3. insert line items
   const items = (action.items ?? []).map((item) => ({
     transaction_id: txn.id,
-    product_id:     null,
-    product_name:   item.product ?? null,
-    unit:           item.unit    ?? null,
-    qty:            item.qty     ?? 0,
-    unit_price:     null,
+    product_id:     item.product_id  ?? null,
+    product_name:   item.product     ?? null,
+    unit:           item.unit        ?? null,
+    qty:            item.qty         ?? 0,
+    unit_price:     item.unit_price  ?? null,
   }))
 
   if (items.length) {
