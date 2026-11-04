@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase'
 import Login from './pages/Login'
 import MicTest from './pages/MicTest'
 import Dashboard from './pages/Dashboard'
+import Stock from './pages/Stock'
 
 // ── inline shop name editor for the account menu ─────────────────────────────
 function ShopNameMenuItem({ session }) {
@@ -152,6 +153,9 @@ function App() {
             key={refresh}
           />
         )}
+        {tab === 'stock' && (
+          <Stock userId={userId} />
+        )}
       </main>
 
       {/* ── bottom nav ── */}
@@ -169,6 +173,13 @@ function App() {
         >
           <span style={{ fontSize: 20 }}>📊</span>
           <span>Dashboard</span>
+        </button>
+        <button
+          onClick={() => setTab('stock')}
+          style={navBtn(tab === 'stock')}
+        >
+          <span style={{ fontSize: 20 }}>📦</span>
+          <span>Stock</span>
         </button>
       </nav>
     </div>
