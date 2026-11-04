@@ -110,10 +110,46 @@ async function realReply(system, user) {
     }),
   });
   if (!res.ok) {
-    throw new Error(`Meta API error ${res.status}: ${await res.text()}`);
+    const body = await res.text();
+    const err = new Error(`Meta API error ${res.status}`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   const data = await res.json();
   return data.choices?.[0]?.message?.content ?? '';
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry wrapper: up to 3 attempts with 1 s then 2 s delay.
+// Retries on network errors (fetch throws) or 5xx responses.
+// Throws immediately on 4xx.
+async function realReplyWithRetry(system, user) {
+  const delays = [1000, 2000];
+  let lastErr;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await realReply(system, user);
+    } catch (err) {
+      const status = err.status;
+      // 4xx: wrong request, no point retrying
+      if (status && status >= 400 && status < 500) {
+        console.error('[meta] 4xx error status=%d — not retrying', status);
+        throw err;
+      }
+      // Network error or 5xx: log and maybe retry
+      console.error('[meta] attempt %d failed status=%s message=%s',
+        attempt + 1, status ?? 'network', err.message);
+      lastErr = err;
+      if (attempt < delays.length) {
+        await sleep(delays[attempt]);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 //one function the rest of the app uses
@@ -121,5 +157,5 @@ export async function chatJSON({ system, user }) {
   if (isMockMode()) {
     return { text: mockReply(user), source: 'mock' };
   }
-  return { text: await realReply(system, user), source: 'meta' };
+  return { text: await realReplyWithRetry(system, user), source: 'meta' };
 }
