@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { pluralUnit } from '../lib/receipt'
 
 function fmt(n) {
   return Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -267,7 +268,7 @@ function ProductCard({ product, userId, allNames, onRefresh }) {
           </span>
         </div>
         <span style={{ fontSize: 15, fontWeight: 700, color: '#16a34a' }}>
-          {Number(product.stock_qty ?? 0).toLocaleString('en-NA')} {product.unit}
+          {Number(product.stock_qty ?? 0).toLocaleString('en-NA')} {pluralUnit(product.stock_qty ?? 0, product.unit)}
         </span>
       </div>
 

@@ -5,6 +5,34 @@
  */
 import { normalisePhone, isValidPhone } from './phone.js'
 
+/**
+ * pluralUnit(qty, unit)
+ *
+ * Returns the correct singular or plural form of a unit.
+ * kg, g, ml, and dozen never change.
+ * loaf becomes loaves, box becomes boxes.
+ * Everything else: add s when plural, drop trailing s when singular.
+ */
+export function pluralUnit(qty, unit) {
+  if (!unit) return ''
+  const u = unit.trim()
+  const plural = Number(qty) !== 1
+  const lower = u.toLowerCase()
+  const INVARIANT = ['kg', 'g', 'ml', 'dozen']
+  if (INVARIANT.includes(lower)) return u
+  if (plural) {
+    if (lower === 'loaf')  return 'loaves'
+    if (lower === 'box')   return 'boxes'
+    if (lower.endsWith('s')) return u
+    return u + 's'
+  } else {
+    if (lower === 'loaves') return 'loaf'
+    if (lower === 'boxes')  return 'box'
+    if (lower.endsWith('s')) return u.slice(0, -1)
+    return u
+  }
+}
+
 function fmtAmt(n) {
   return Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
