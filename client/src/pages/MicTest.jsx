@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 import { supabase } from '../lib/supabase'
 import { saveSaleAction, savePaymentAction } from '../lib/saveSale'
-import { isValidPhone, normalisePhone } from '../lib/phone'
+import { isValidPhone, normalisePhone, findPhoneOwner } from '../lib/phone'
 import { buildSaleReceiptText, buildPaymentReceiptText, pluralUnit } from '../lib/receipt'
 import ReceiptCard from '../components/ReceiptCard'
 
@@ -65,6 +65,18 @@ function makeWav(chunks) {
 }
 
 // ─── editable sale card helpers ──────────────────────────────────────────────
+
+// Returns true when the raw transcript contains a credit word, meaning the
+// customer is not paying in full right now.
+const CREDIT_WORDS = [
+  'credit', 'owes', 'owing', 'owe', 'pay later', 'will pay',
+  'pays tomorrow', 'borrowed', 'on account', 'unpaid', 'not paid',
+]
+function hasCreditWord(text) {
+  if (!text) return false
+  const lower = text.toLowerCase()
+  return CREDIT_WORDS.some((w) => lower.includes(w))
+}
 
 // initialise editable state from a record_sale action
 function initDraft(action) {
@@ -178,6 +190,36 @@ function stillNeedsAnswer(parsedSale, draft, clarifyingDismissed, totalAutoFille
   return true
 }
 
+// ─── phone required check (single source of truth) ────────────────────────────
+
+// Returns true when saving must be blocked because no usable phone is available.
+// A usable phone is either a valid number typed in the draft phone box,
+// or a valid number already saved for the matched customer in myCustomers.
+// Never blocks Walk-in sales or fully paid sales.
+function draftNeedsPhone(draft, myCustomers) {
+  if (!draft) return false
+  const customerName = draft.customer.trim().toLowerCase()
+  if (!customerName || customerName === 'unknown' || customerName === 'walk-in') return false
+  const total = Number(draft.total)
+  const paid  = Number(draft.paid)
+  if (isNaN(total) || isNaN(paid) || total <= paid) return false
+  // a valid typed phone is fine
+  const typed = draft.phone?.trim()
+  if (typed) {
+    const kind = isValidPhone(typed)
+    if (kind === 'mobile' || kind === 'landline' || kind === 'international') return false
+  }
+  // check saved phone for this customer
+  const saved = myCustomers.find(
+    (c) => (c.name ?? '').trim().toLowerCase() === customerName
+  )
+  if (saved?.phone?.trim()) {
+    const kind = isValidPhone(saved.phone)
+    if (kind === 'mobile' || kind === 'landline' || kind === 'international') return false
+  }
+  return true
+}
+
 // ─── greeting helper ─────────────────────────────────────────────────────────
 
 function greeting() {
@@ -257,6 +299,13 @@ function MicTest({ session }) {
   // editable draft for the sale card
   const [draft,               setDraft]               = useState(null)
   const [clarifyingDismissed, setClarifyingDismissed] = useState(false)
+  // the raw transcript text that produced this draft (used for credit-word check)
+  const [parsedText,          setParsedText]          = useState('')
+  // 'auto' = paid was assumed equal to total (no credit word), 'user' = user typed paid, 'none' = credit word present
+  const [paidAssumption,      setPaidAssumption]      = useState('none')
+  // ref mirror so setState callbacks always read current paidAssumption
+  const paidAssumptionRef = useRef('none')
+  const setPaidAssumptionAndRef = (v) => { paidAssumptionRef.current = v; setPaidAssumption(v) }
 
   // product-matching extras, keyed by item key: { matches: Product[], chosenId: string|null }
   const [itemExtras, setItemExtras] = useState({})
@@ -277,6 +326,9 @@ function MicTest({ session }) {
   const [saveError,     setSaveError]     = useState('')
   const [validationMsg, setValidationMsg] = useState('')
   const [dupWarning,    setDupWarning]    = useState(false)
+  const [stockWarning,  setStockWarning]  = useState(false)
+  // name of the customer who already owns the typed phone number, or ''
+  const [phoneConflict, setPhoneConflict] = useState('')
   const forceSaveRef    = useRef(false)
   const [receiptData,   setReceiptData]   = useState(null)
 
@@ -286,7 +338,7 @@ function MicTest({ session }) {
     if (!userId) return
     supabase
       .from('customers')
-      .select('id, name, balance_owed')
+      .select('id, name, balance_owed, phone')
       .eq('user_id', userId)
       .then(({ data }) => setMyCustomers(data ?? []))
   }, [userId])
@@ -336,11 +388,15 @@ function MicTest({ session }) {
     setValidationMsg('')
     setDraft(null)
     setClarifyingDismissed(false)
+    setParsedText('')
+    setPaidAssumptionAndRef('none')
     setItemExtras({})
     setTotalSourceAndRef('spoken')
     setPaymentDraft(null)
     setCustomerMatches(null)
     setDupWarning(false)
+    setStockWarning(false)
+    setPhoneConflict('')
     forceSaveRef.current = false
     setReceiptData(null)
     setSaveError('')
@@ -396,13 +452,24 @@ function MicTest({ session }) {
 
       if (saleAction || payAction) {
         setParsedSale(data)
+        setParsedText(text)
         if (saleAction) {
           const newDraft = initDraft(saleAction)
-          setDraft(newDraft)
-          // The parser often copies Paid into Total when no total was spoken.
-          // Treat the parsed total as spoken only when it differs from paid.
+          // Apply paid assumption: if no credit word and paid is 0 or empty and total > 0,
+          // set paid equal to total so the card opens ready to save.
+          const credit = hasCreditWord(text)
           const parsedTotal = saleAction.total
           const parsedPaid  = saleAction.paid
+          if (!credit && Number(parsedTotal) > 0 && (!parsedPaid || Number(parsedPaid) === 0)) {
+            newDraft.paid = newDraft.total
+            setPaidAssumptionAndRef('auto')
+          } else {
+            setPaidAssumptionAndRef('none')
+          }
+          setDraft(newDraft)
+          // The parser often copies Paid into Total when no total was spoken.
+          // Treat the parsed total as spoken only when it differs from the original parsedPaid
+          // (before we may have overwritten newDraft.paid above).
           const totalIsReal = parsedTotal != null && parsedTotal !== '' &&
             Number(parsedTotal) !== Number(parsedPaid ?? 0)
           const src = totalIsReal ? 'spoken' : 'none'
@@ -472,7 +539,13 @@ function MicTest({ session }) {
     }
     if (allHavePrice && items.length > 0) {
       const rounded = Math.round(total * 100) / 100
-      draftSetter((d) => d ? { ...d, total: String(rounded) } : d)
+      // when paid assumption is active, keep paid equal to the new total
+      draftSetter((d) => {
+        if (!d) return d
+        const next = { ...d, total: String(rounded) }
+        if (paidAssumptionRef.current === 'auto') next.paid = next.total
+        return next
+      })
       sourceSetter('auto')
     }
   }
@@ -480,7 +553,14 @@ function MicTest({ session }) {
   // ── draft editors ──────────────────────────────────────────────────────────
 
   function setDraftField(field, value) {
-    setDraft((d) => ({ ...d, [field]: value }))
+    setDraft((d) => {
+      const next = { ...d, [field]: value }
+      // when total changes and paid assumption is active, keep paid in sync
+      if (field === 'total' && paidAssumptionRef.current === 'auto') {
+        next.paid = value
+      }
+      return next
+    })
     setValidationMsg('')
     if (field === 'customer') {
       const trimmed = value.trim().toLowerCase()
@@ -490,6 +570,24 @@ function MicTest({ session }) {
     if (field === 'total') {
       // user is manually editing the total
       setTotalSourceAndRef('user')
+    }
+    if (field === 'paid') {
+      // user is manually editing paid, stop auto assumption
+      setPaidAssumptionAndRef('user')
+    }
+    if (field === 'phone') {
+      // check if this number already belongs to another customer
+      const norm = normalisePhone(value)
+      if (norm) {
+        // find the self customer id so we can exclude them from the check
+        const selfId = myCustomers.find(
+          (c) => (c.name ?? '').trim().toLowerCase() === (draft?.customer ?? '').trim().toLowerCase()
+        )?.id ?? null
+        const owner = findPhoneOwner(norm, myCustomers, selfId)
+        setPhoneConflict(owner ? owner.name : '')
+      } else {
+        setPhoneConflict('')
+      }
     }
   }
 
@@ -514,7 +612,10 @@ function MicTest({ session }) {
         }
         if (allOk && newItems.length > 0) {
           setTotalSourceAndRef('auto')
-          return { ...d, items: newItems, total: String(Math.round(autoTotal * 100) / 100) }
+          const newTotal = String(Math.round(autoTotal * 100) / 100)
+          const updatedDraft = { ...d, items: newItems, total: newTotal }
+          if (paidAssumptionRef.current === 'auto') updatedDraft.paid = newTotal
+          return updatedDraft
         }
       }
       return { ...d, items: newItems }
@@ -586,24 +687,31 @@ function MicTest({ session }) {
         }
       }
 
-      // Phone required when customer owes money and has no phone on file or typed
-      if (draft.customer.trim().toLowerCase() !== 'walk-in') {
-        const total = Number(draft.total)
-        const paid  = Number(draft.paid)
-        if (total > paid) {
-          const phoneTyped = draft.phone?.trim()
-          if (!phoneTyped) {
-            // check if they already have one saved
-            const { data: existing } = await supabase
-              .from('customers')
-              .select('phone')
-              .eq('user_id', userId)
-              .ilike('name', draft.customer.trim())
-              .maybeSingle()
-            if (!existing?.phone?.trim()) {
-              setValidationMsg('Add a phone number so you can remind this customer.')
-              return
-            }
+      // Phone required when customer owes money and no usable phone available
+      if (draftNeedsPhone(draft, myCustomers)) {
+        setValidationMsg('Add a phone number so you can remind this customer.')
+        return
+      }
+
+      // Phone uniqueness: re-check fresh from DB in case another tab changed it
+      const typedPhone = draft.phone?.trim()
+      if (typedPhone) {
+        const norm = normalisePhone(typedPhone)
+        if (norm) {
+          const { data: freshCustomers } = await supabase
+            .from('customers')
+            .select('id, name, phone')
+            .eq('user_id', userId)
+          const selfId = (freshCustomers ?? []).find(
+            (c) => (c.name ?? '').trim().toLowerCase() === draft.customer.trim().toLowerCase()
+          )?.id ?? null
+          const owner = findPhoneOwner(norm, freshCustomers ?? [], selfId)
+          if (owner) {
+            setValidationMsg(
+              `This number is already used by another customer. Each customer needs their own number.`
+            )
+            setPhoneConflict(owner.name)
+            return
           }
         }
       }
@@ -684,8 +792,11 @@ function MicTest({ session }) {
         }
         forceSaveRef.current = false
 
-        await saveSaleAction(editedAction, user.id)
+        const saleResult = await saveSaleAction(editedAction, user.id)
         savedDraftAction = editedAction
+        if (saleResult?.stockWarning) setStockWarning(true)
+        // reload products so updated stock_qty is shown the next time Review opens
+        loadProducts()
       }
 
       if (paymentDraft) {
@@ -762,7 +873,9 @@ function MicTest({ session }) {
 
   const paymentOverpaid       = paymentDraft && paymentDraft.balance > 0 &&
     Number(paymentDraft.amount) > paymentDraft.balance
-  const confirmDisabled       = saving || nameBlocked || hasClarifyingQuestion ||
+  const phoneBlocked          = hasSale && draftNeedsPhone(draft, myCustomers)
+  const confirmDisabled       = saving || nameBlocked || hasClarifyingQuestion || phoneBlocked ||
+    (hasSale && !!phoneConflict) ||
     (paymentDraft && !paymentOverpaid &&
       (!Number(paymentDraft.amount) || Number(paymentDraft.amount) <= 0))
 
@@ -896,8 +1009,8 @@ function MicTest({ session }) {
             placeholder="e.g. 081 234 5678"
             style={{
               ...fieldStyle,
-              marginBottom: draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid' ? 2 : 8,
-              borderColor: draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid'
+              marginBottom: (draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid') || phoneConflict ? 2 : 8,
+              borderColor: (draft.phone?.trim() && isValidPhone(draft.phone) === 'invalid') || phoneConflict
                 ? '#fca5a5' : '#d1d5db',
             }}
           />
@@ -906,9 +1019,21 @@ function MicTest({ session }) {
               {PHONE_INVALID_MSG}
             </p>
           )}
-          {draft.phone?.trim() && isValidPhone(draft.phone) === 'landline' && (
+          {phoneConflict && (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#dc2626' }}>
+              This number is already used by another customer. Each customer needs their own number.
+            </p>
+          )}
+          {!phoneConflict && draft.phone?.trim() && isValidPhone(draft.phone) === 'landline' && (
             <p style={{ margin: '0 0 8px', fontSize: 12, color: '#92400e' }}>
               Landline. WhatsApp may not work.
+            </p>
+          )}
+          {phoneBlocked && (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#92400e',
+                        background: '#fff7ed', border: '1px solid #fed7aa',
+                        borderRadius: 6, padding: '6px 10px' }}>
+              Add a phone number so you can remind this customer.
             </p>
           )}
 
@@ -1044,6 +1169,11 @@ function MicTest({ session }) {
                 onChange={(e) => setDraftField('paid', e.target.value)}
                 style={fieldStyle}
               />
+              {paidAssumption === 'auto' && (
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: '#16a34a' }}>
+                  Assumed paid in full. Change it if this customer owes you.
+                </p>
+              )}
             </div>
           </div>
 
@@ -1212,6 +1342,15 @@ function MicTest({ session }) {
       {saveError && (
         <p style={{ margin: '10px 0 0', fontWeight: 600, fontSize: 15, color: '#dc2626' }}>
           {saveError}
+        </p>
+      )}
+
+      {/* stock warning (sale saved but stock update failed) */}
+      {stockWarning && (
+        <p style={{ margin: '8px 0 0', fontSize: 13, color: '#92400e',
+                    background: '#fff7ed', border: '1px solid #fed7aa',
+                    borderRadius: 6, padding: '8px 10px' }}>
+          Sale saved, but stock was not updated.
         </p>
       )}
 

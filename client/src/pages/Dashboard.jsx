@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useDashboard } from '../hooks/useDashboard'
-import { isValidPhone, normalisePhone, formatPhone, buildContactUrls } from '../lib/phone'
+import { isValidPhone, normalisePhone, formatPhone, buildContactUrls, findPhoneOwner } from '../lib/phone'
 import { buildSaleReceiptText, buildPaymentReceiptText } from '../lib/receipt'
 import ReceiptCard from '../components/ReceiptCard'
 
@@ -14,19 +14,39 @@ const PHONE_INVALID_MSG =
 
 // ── inline phone editor for a single debtor card ──────────────────────────────
 
-function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
-  const [editing, setEditing] = useState(false)
-  const [value,   setValue]   = useState(currentPhone ?? '')
-  const [saving,  setSaving]  = useState(false)
+function PhoneEditor({ debtorId, userId, currentPhone, onSaved, defaultOpen }) {
+  const [editing,       setEditing]       = useState(!!defaultOpen)
+  const [value,         setValue]         = useState(currentPhone ?? '')
+  const [saving,        setSaving]        = useState(false)
+  const [dupOwnerName,  setDupOwnerName]  = useState('')
 
   const kind    = isValidPhone(value)
   const invalid = kind === 'invalid'
-  const canSave = !saving && !invalid
+  const canSave = !saving && !invalid && !dupOwnerName
+
+  async function checkDup(raw) {
+    const norm = normalisePhone(raw)
+    if (!norm) { setDupOwnerName(''); return }
+    const { data } = await supabase
+      .from('customers')
+      .select('id, name, phone')
+      .eq('user_id', userId)
+    const owner = findPhoneOwner(norm, data ?? [], debtorId)
+    setDupOwnerName(owner ? owner.name : '')
+  }
 
   async function save() {
     if (invalid) return
+    // re-check duplicate with fresh data before writing
+    const norm = normalisePhone(value) || null
+    const { data: allCustomers } = await supabase
+      .from('customers')
+      .select('id, name, phone')
+      .eq('user_id', userId)
+    const owner = norm ? findPhoneOwner(norm, allCustomers ?? [], debtorId) : null
+    if (owner) { setDupOwnerName(owner.name); return }
     setSaving(true)
-    const stored = normalisePhone(value) || (value.trim() ? value.trim() : null)
+    const stored = norm || (value.trim() ? value.trim() : null)
     const { error } = await supabase
       .from('customers')
       .update({ phone: stored || null })
@@ -46,16 +66,17 @@ function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
       </button>
     )
   }
+  // editing === true
 
   return (
     <div style={{ marginTop: 4 }}>
       <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setValue(e.target.value); setDupOwnerName(''); checkDup(e.target.value) }}
           placeholder="e.g. 081 234 5678"
           style={{ padding: '6px 8px', fontSize: 13,
-                   border: `1px solid ${invalid ? '#fca5a5' : '#d1d5db'}`,
+                   border: `1px solid ${invalid || dupOwnerName ? '#fca5a5' : '#d1d5db'}`,
                    borderRadius: 6, width: 148, minHeight: 44 }}
           autoFocus
         />
@@ -63,7 +84,7 @@ function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
           style={{ ...smallBtn('#166534'), minHeight: 44, opacity: canSave ? 1 : 0.5 }}>
           {saving ? '…' : 'Save'}
         </button>
-        <button onClick={() => { setValue(currentPhone ?? ''); setEditing(false) }}
+        <button onClick={() => { setValue(currentPhone ?? ''); setEditing(false); setDupOwnerName('') }}
           style={{ ...smallBtn('#6b7280'), minHeight: 44 }}>
           Cancel
         </button>
@@ -73,7 +94,12 @@ function PhoneEditor({ debtorId, userId, currentPhone, onSaved }) {
           {PHONE_INVALID_MSG}
         </p>
       )}
-      {kind === 'landline' && (
+      {dupOwnerName && (
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: '#dc2626' }}>
+          This number is already used by another customer. Each customer needs their own number.
+        </p>
+      )}
+      {!dupOwnerName && kind === 'landline' && (
         <p style={{ margin: '4px 0 0', fontSize: 12, color: '#92400e' }}>
           Landline. WhatsApp may not work.
         </p>
@@ -88,6 +114,7 @@ function Dashboard({ userId, session }) {
   const { data, loading, error, refresh } = useDashboard(userId)
 
   const [phoneMap,       setPhoneMap]       = useState({})
+  const [addingPhoneFor, setAddingPhoneFor] = useState(null)
   const [showAllDebtors, setShowAllDebtors] = useState(false)
   const [showAllActivity,setShowAllActivity]= useState(false)
   // receiptState: { itemId, text, phone } — shown inline under that activity card
@@ -145,7 +172,8 @@ function Dashboard({ userId, session }) {
             {visibleDebtors.map((d) => {
               const phone   = getPhone(d)
               const kind    = isValidPhone(phone)
-              const urls    = (kind === 'mobile' || kind === 'landline' || kind === 'international')
+              const hasValidPhone = kind === 'mobile' || kind === 'landline' || kind === 'international'
+              const urls    = hasValidPhone
                 ? buildContactUrls(phone, d.name, d.owed, shopName)
                 : null
               const display = phone ? formatPhone(phone) : null
@@ -159,7 +187,6 @@ function Dashboard({ userId, session }) {
                   </div>
 
                   <p style={{ margin: '2px 0 6px', fontSize: 12, color: '#6b7280' }}>
-                    {!phone && 'No number saved'}
                     {phone && kind === 'invalid' && (
                       <span style={{ color: '#dc2626' }}>Number needs fixing.{' '}</span>
                     )}
@@ -176,7 +203,8 @@ function Dashboard({ userId, session }) {
                       debtorId={d.id}
                       userId={userId}
                       currentPhone={phone}
-                      onSaved={(p) => handlePhoneSaved(d.id, p)}
+                      defaultOpen={addingPhoneFor === d.id}
+                      onSaved={(p) => { handlePhoneSaved(d.id, p); setAddingPhoneFor(null) }}
                     />
                     {urls && (
                       <>

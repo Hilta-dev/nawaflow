@@ -109,6 +109,23 @@ export function formatPhone(input) {
 }
 
 /**
+ * findPhoneOwner(normalisedPhone, customers, exceptCustomerId)
+ *
+ * Returns the first customer in `customers` whose stored phone normalises to
+ * the same E.164 string as `normalisedPhone`, ignoring the customer whose id
+ * equals `exceptCustomerId` (the one being edited). Returns null if not found.
+ * Pass '' or null for exceptCustomerId when there is no customer to exclude.
+ */
+export function findPhoneOwner(normalisedPhone, customers, exceptCustomerId) {
+  if (!normalisedPhone) return null
+  return customers.find((c) => {
+    if (exceptCustomerId && c.id === exceptCustomerId) return false
+    const cn = normalisePhone(c.phone ?? '')
+    return cn && cn === normalisedPhone
+  }) ?? null
+}
+
+/**
  * buildContactUrls(storedPhone, customerName, amountOwed, shopName)
  *
  * Returns { wa, sms, tel } href strings, or null if no valid number.

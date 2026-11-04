@@ -12,8 +12,10 @@ import { supabase } from './supabase'
  *   3. Insert a transaction row.
  *   4. Insert transaction_items rows (one per item).
  *   5. Update customers.balance_owed with the unpaid portion.
+ *   6. Reduce stock_qty for each item that has a product_id.
  *
- * Returns { ok: true } on success, throws on failure.
+ * Returns { ok: true } on success, or { ok: true, stockWarning: true } when
+ * the sale saved but a stock update failed. Never throws for a stock failure.
  */
 export async function saveSaleAction(action, userId) {
   if (!action) throw new Error('No sale action provided')
@@ -124,7 +126,28 @@ export async function saveSaleAction(action, userId) {
 
   if (balErr) throw new Error('Balance update failed: ' + balErr.message)
 
-  return { ok: true, transactionId: txn.id }
+  // 5. reduce stock_qty for each item that has a product_id.
+  // Sale is already committed. A stock failure does not undo the sale.
+  let stockWarning = false
+  for (const item of action.items ?? []) {
+    if (!item.product_id) continue
+    const { data: prod, error: readErr } = await supabase
+      .from('products')
+      .select('stock_qty')
+      .eq('id', item.product_id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (readErr || !prod) { stockWarning = true; continue }
+    const newQty = Math.max(0, Number(prod.stock_qty ?? 0) - Number(item.qty ?? 0))
+    const { error: stockErr } = await supabase
+      .from('products')
+      .update({ stock_qty: newQty })
+      .eq('id', item.product_id)
+      .eq('user_id', userId)
+    if (stockErr) stockWarning = true
+  }
+
+  return { ok: true, transactionId: txn.id, stockWarning }
 }
 
 /**
