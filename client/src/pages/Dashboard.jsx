@@ -146,8 +146,35 @@ function Dashboard({ userId, session }) {
     )
   }
 
-  const visibleDebtors  = showAllDebtors   ? debtors          : debtors.slice(0, 5)
-  const visibleActivity = showAllActivity  ? recentActivity    : recentActivity.slice(0, 5)
+  const visibleDebtors  = showAllDebtors  ? debtors       : debtors.slice(0, 5)
+  const visibleActivity = showAllActivity ? recentActivity : recentActivity.slice(0, 5)
+
+  // group visibleActivity by local calendar day
+  function dayLabel(isoString) {
+    const d = new Date(isoString)
+    const today = new Date()
+    const yesterday = new Date()
+    yesterday.setDate(today.getDate() - 1)
+    const sameDay = (a, b) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth()    === b.getMonth()    &&
+      a.getDate()     === b.getDate()
+    if (sameDay(d, today))     return 'Today'
+    if (sameDay(d, yesterday)) return 'Yesterday'
+    return d.toLocaleDateString('en-NA', { day: 'numeric', month: 'short', year: 'numeric' })
+  }
+
+  // build ordered list of { label, items }
+  const activityGroups = []
+  const groupMap = {}
+  for (const item of visibleActivity) {
+    const lbl = dayLabel(item.createdAt)
+    if (!groupMap[lbl]) {
+      groupMap[lbl] = []
+      activityGroups.push({ label: lbl, items: groupMap[lbl] })
+    }
+    groupMap[lbl].push(item)
+  }
 
   return (
     <div style={wrapStyle}>
@@ -247,127 +274,126 @@ function Dashboard({ userId, session }) {
           <p style={{ fontSize: 13, color: '#6b7280' }}>No activity yet.</p>
         )}
 
-        {visibleActivity.map((item) => {
-          const itemKey       = `${item.kind}-${item.id}`
-          const isReceiptOpen = receiptState?.itemId === itemKey
-          const custPhone     = item.customerId ? (customerPhoneMap?.[item.customerId] ?? '') : ''
+        {activityGroups.map((group) => (
+          <div key={group.label}>
+            <p style={dayHeadStyle}>{group.label}</p>
+            {group.items.map((item) => {
+              const itemKey       = `${item.kind}-${item.id}`
+              const isReceiptOpen = receiptState?.itemId === itemKey
+              const custPhone     = item.customerId ? (customerPhoneMap?.[item.customerId] ?? '') : ''
 
-          if (item.kind === 'payment') {
-            const currentBalance = item.customerId
-              ? (customerBalanceMap?.[item.customerId] ?? 0)
-              : 0
-            const receiptText = buildPaymentReceiptText({
-              shopName,
-              date:         item.createdAt,
-              customerName: item.customerName,
-              amount:       item.amount,
-              balance:      currentBalance,
-            })
-            return (
-              <div key={itemKey}>
-                <div style={{ ...saleCard, borderColor: '#bbf7d0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13 }}>
-                      <span style={chipGreen}>Payment</span>{' '}
-                      <strong>{item.customerName}</strong>{' paid '}
-                      <strong style={{ color: '#166534' }}>N${fmt(item.amount)}</strong>
-                    </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
-                      <span style={{ fontSize: 12, color: '#6b7280' }}>
-                        {new Date(item.createdAt).toLocaleDateString('en-NA')}
-                      </span>
-                      <button
-                        onClick={() => setReceiptState(isReceiptOpen ? null : { itemId: itemKey, text: receiptText, phone: custPhone })}
-                        style={receiptBtn}
-                      >
-                        Receipt
-                      </button>
+              if (item.kind === 'payment') {
+                const currentBalance = item.customerId
+                  ? (customerBalanceMap?.[item.customerId] ?? 0)
+                  : 0
+                const receiptText = buildPaymentReceiptText({
+                  shopName,
+                  date:         item.createdAt,
+                  customerName: item.customerName,
+                  amount:       item.amount,
+                  balance:      currentBalance,
+                })
+                return (
+                  <div key={itemKey}>
+                    <div style={{ ...saleCard, borderColor: '#bbf7d0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 13 }}>
+                          <span style={chipGreen}>Payment</span>{' '}
+                          <strong>{item.customerName}</strong>{' paid '}
+                          <strong style={{ color: '#166534' }}>N${fmt(item.amount)}</strong>
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                          <button
+                            onClick={() => setReceiptState(isReceiptOpen ? null : { itemId: itemKey, text: receiptText, phone: custPhone })}
+                            style={receiptBtn}
+                          >
+                            Receipt
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                {isReceiptOpen && (
-                  <ReceiptCard
-                    text={receiptState.text}
-                    phone={receiptState.phone}
-                    onDone={() => setReceiptState(null)}
-                  />
-                )}
-              </div>
-            )
-          }
-
-          // kind === 'sale'
-          const isWalkIn = item.customerName?.toLowerCase() === 'walk-in'
-          const currentBalance = (item.customerId && customerBalanceMap)
-            ? (customerBalanceMap[item.customerId] ?? null)
-            : null
-          const receiptText = buildSaleReceiptText({
-            shopName,
-            date:         item.createdAt,
-            customerName: item.customerName,
-            items:        item.items,
-            total:        item.total,
-            paid:         item.paid,
-            balance:      currentBalance ?? 0,
-          })
-          return (
-            <div key={itemKey}>
-              <div style={saleCard}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <strong>{item.customerName}</strong>
-                    {!isWalkIn && currentBalance !== null && (
-                      currentBalance <= 0
-                        ? <span style={chipGreen}>Settled ✓</span>
-                        : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
+                    {isReceiptOpen && (
+                      <ReceiptCard
+                        text={receiptState.text}
+                        phone={receiptState.phone}
+                        onDone={() => setReceiptState(null)}
+                      />
                     )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
-                    <span style={{ fontSize: 12, color: '#6b7280' }}>
-                      {new Date(item.createdAt).toLocaleDateString('en-NA')}
-                    </span>
-                    <button
-                      onClick={() => setReceiptState(isReceiptOpen ? null : { itemId: itemKey, text: receiptText, phone: custPhone })}
-                      style={receiptBtn}
-                    >
-                      Receipt
-                    </button>
+                )
+              }
+
+              // kind === 'sale'
+              const isWalkIn = item.customerName?.toLowerCase() === 'walk-in'
+              const currentBalance = (item.customerId && customerBalanceMap)
+                ? (customerBalanceMap[item.customerId] ?? null)
+                : null
+              const receiptText = buildSaleReceiptText({
+                shopName,
+                date:         item.createdAt,
+                customerName: item.customerName,
+                items:        item.items,
+                total:        item.total,
+                paid:         item.paid,
+                balance:      currentBalance ?? 0,
+              })
+              return (
+                <div key={itemKey}>
+                  <div style={saleCard}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <strong>{item.customerName}</strong>
+                        {!isWalkIn && currentBalance !== null && (
+                          currentBalance <= 0
+                            ? <span style={chipGreen}>Settled ✓</span>
+                            : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                        <button
+                          onClick={() => setReceiptState(isReceiptOpen ? null : { itemId: itemKey, text: receiptText, phone: custPhone })}
+                          style={receiptBtn}
+                        >
+                          Receipt
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
+                      {item.items.length > 0
+                        ? item.items.map((it) => {
+                            const qty  = Number(it.qty ?? 0)
+                            const name = it.product_name ?? 'item'
+                            const unit = it.unit
+                              ? ` ${qty <= 1
+                                  ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
+                                  : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
+                              : ''
+                            return `${qty}${unit} ${name}`
+                          }).join(', ')
+                        : 'No item detail'}
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 13 }}>
+                      Total: <strong>N${fmt(item.total)}</strong>
+                      {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(item.paid)}</strong>
+                      {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
+                        <span style={{ color: '#92400e', marginLeft: 6 }}>
+                          Still unpaid: N${fmt(currentBalance)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-                  {item.items.length > 0
-                    ? item.items.map((it) => {
-                        const qty  = Number(it.qty ?? 0)
-                        const name = it.product_name ?? 'item'
-                        const unit = it.unit
-                          ? ` ${qty <= 1
-                              ? (it.unit.endsWith('s') ? it.unit.slice(0, -1) : it.unit)
-                              : (!it.unit.endsWith('s') ? it.unit + 's' : it.unit)} of`
-                          : ''
-                        return `${qty}${unit} ${name}`
-                      }).join(', ')
-                    : 'No item detail'}
-                </div>
-                <div style={{ marginTop: 4, fontSize: 13 }}>
-                  Total: <strong>N${fmt(item.total)}</strong>
-                  {', '}Paid at sale: <strong style={{ color: '#166534' }}>N${fmt(item.paid)}</strong>
-                  {!isWalkIn && currentBalance !== null && currentBalance > 0 && (
-                    <span style={{ color: '#92400e', marginLeft: 6 }}>
-                      Still unpaid: N${fmt(currentBalance)}
-                    </span>
+                  {isReceiptOpen && (
+                    <ReceiptCard
+                      text={receiptState.text}
+                      phone={receiptState.phone}
+                      onDone={() => setReceiptState(null)}
+                    />
                   )}
                 </div>
-              </div>
-              {isReceiptOpen && (
-                <ReceiptCard
-                  text={receiptState.text}
-                  phone={receiptState.phone}
-                  onDone={() => setReceiptState(null)}
-                />
-              )}
-            </div>
-          )
-        })}
+              )
+            })}
+          </div>
+        ))}
 
         {recentActivity.length > 5 && (
           <button
@@ -393,6 +419,10 @@ function StatCard({ label, value }) {
 }
 
 // ─── styles ───────────────────────────────────────────────────────────────────
+const dayHeadStyle = {
+  margin: '14px 0 6px', fontSize: 11, fontWeight: 700,
+  color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.05em',
+}
 const receiptBtn = {
   background: '#e0f2fe', color: '#0369a1', border: 'none',
   borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer',

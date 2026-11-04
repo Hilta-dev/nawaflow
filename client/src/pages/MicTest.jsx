@@ -231,13 +231,21 @@ function greeting() {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-function MicTest({ session }) {
-  const chunksRef       = useRef([])
-  const silenceTimerRef = useRef(null)
-  const autoStopRef     = useRef(null)
+function MicTest({ session, onViewDashboard }) {
+  const chunksRef        = useRef([])
+  const silenceTimerRef  = useRef(null)
+  const autoStopRef      = useRef(null)
+  const recTimerRef      = useRef(null)
+  const bannerTimerRef   = useRef(null)
 
-  const userId   = session?.user?.id
-  const shopName = session?.user?.user_metadata?.shop_name || 'Nawa'
+  const userId    = session?.user?.id
+  const shopName  = session?.user?.user_metadata?.shop_name || 'Nawa'
+  const fullName  = session?.user?.user_metadata?.full_name || ''
+  // use the first word of full_name for the greeting; fall back to shopName for older accounts
+  const rawFirst  = fullName.trim().split(/\s+/)[0] || ''
+  const greetName = rawFirst
+    ? rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1).toLowerCase()
+    : shopName
 
   // ── mini stats ──────────────────────────────────────────────────────────────
   const [todaySalesCount, setTodaySalesCount] = useState(0)
@@ -278,6 +286,11 @@ function MicTest({ session }) {
         setTotalOwed(sum)
       })
   }, [userId])
+
+  // ── recording timer ──────────────────────────────────────────────────────────
+  const [recSeconds,  setRecSeconds]  = useState(0)
+  // ── success banner ───────────────────────────────────────────────────────────
+  const [showBanner,  setShowBanner]  = useState(false)
 
   // ── audio / recording state ──────────────────────────────────────────────────
   const [audioUrl,    setAudioUrl]    = useState('')
@@ -380,6 +393,18 @@ function MicTest({ session }) {
 
   const { isRecording, error, start, stop } = useVoiceRecorder(handleChunk, handleTranscript)
 
+  // start recording timer
+  function startRecTimer() {
+    setRecSeconds(0)
+    clearInterval(recTimerRef.current)
+    recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000)
+  }
+
+  // stop recording timer
+  function stopRecTimer() {
+    clearInterval(recTimerRef.current)
+  }
+
   // reset parse + save state
   function resetResult() {
     setParsedSale(null)
@@ -411,19 +436,34 @@ function MicTest({ session }) {
     setLiveText('')
     setFinalText('')
     setNoSpeech(false)
+    setShowBanner(false)
+    clearTimeout(bannerTimerRef.current)
     resetResult()
     await start()
+    startRecTimer()
     autoStopRef.current = setTimeout(() => finish(), 30000)
   }
 
-  // stop recording
+  // stop recording and parse
   async function finish() {
     clearTimeout(autoStopRef.current)
+    stopRecTimer()
     stop()
     setTimeout(() => {
       setAudioUrl(URL.createObjectURL(makeWav(chunksRef.current)))
     }, 400)
     silenceTimerRef.current = setTimeout(() => setNoSpeech(true), 5000)
+  }
+
+  // cancel recording: stop and discard without parsing
+  function cancelRecording() {
+    clearTimeout(autoStopRef.current)
+    stopRecTimer()
+    stop()
+    chunksRef.current = []
+    setLiveText('')
+    setFinalText('')
+    setAudioUrl('')
   }
 
   // shared parse function — used by both voice and typed input
@@ -852,6 +892,9 @@ function MicTest({ session }) {
       setDraft(null)
       setPaymentDraft(null)
       setReceiptData({ text: receiptText, phone: receiptPhone })
+      setShowBanner(true)
+      clearTimeout(bannerTimerRef.current)
+      bannerTimerRef.current = setTimeout(() => setShowBanner(false), 6000)
     } catch (err) {
       setSaveError('Save failed: ' + err.message)
     } finally {
@@ -883,39 +926,86 @@ function MicTest({ session }) {
 
   return (
     <div style={{ padding: '16px 16px 8px' }}>
+      <style>{`@keyframes nawaPulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
 
       {/* greeting */}
-      <p style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700, color: '#1a1a1a' }}>
-        {greeting()}, {shopName}!
+      <p style={{ margin: '0 0 18px', fontSize: 22, fontWeight: 700, color: '#1a1a1a', letterSpacing: '-0.01em' }}>
+        {greeting()}, {greetName}!
       </p>
 
       {/* mini stats row */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
         <MiniStat label="Today's sales" value={todaySalesCount} />
         <MiniStat label="Collected"     value={fmtCurrency(todayCollected)} />
         <MiniStat label="Owed"          value={fmtCurrency(totalOwed)} />
       </div>
 
       {/* large mic button */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
-        <button
-          onClick={isRecording ? finish : begin}
-          style={micBtnStyle(isRecording)}
-          aria-label={isRecording ? 'Stop recording' : 'Start recording'}
-        >
-          {isRecording ? '⏹' : '🎙'}
-        </button>
-        <span style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: isRecording ? 0 : 24 }}>
+        <div style={{
+          borderRadius: '50%',
+          boxShadow: isRecording
+            ? '0 0 0 10px rgba(220,38,38,0.12), 0 0 0 20px rgba(220,38,38,0.06)'
+            : '0 0 0 10px rgba(22,163,74,0.12), 0 0 0 20px rgba(22,163,74,0.06)',
+          display: 'inline-block',
+        }}>
+          <button
+            onClick={isRecording ? finish : begin}
+            style={micBtnStyle(isRecording)}
+            aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+          >
+            {isRecording ? '⏹' : '🎙'}
+          </button>
+        </div>
+        <span style={{ marginTop: 10, fontSize: 13, color: '#6b7280', fontWeight: 500 }}>
           {isRecording ? 'Tap to stop' : 'Tap to record'}
         </span>
       </div>
+
+      {/* recording bar */}
+      {isRecording && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: '#f0fdf4', border: '1px solid #bbf7d0',
+          borderRadius: 12, padding: '10px 14px', margin: '14px 0 24px',
+        }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: '50%', background: '#16a34a',
+            flexShrink: 0,
+            animation: 'nawaPulse 1s ease-in-out infinite',
+          }} />
+          <span style={{ fontSize: 14, color: '#166534', fontWeight: 700, flex: 1 }}>
+            Recording...
+            {' '}
+            <span style={{ fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
+              {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:{String(recSeconds % 60).padStart(2, '0')}
+            </span>
+          </span>
+          <button
+            onClick={begin}
+            style={{ background: '#fff', border: '1px solid #16a34a', borderRadius: 7,
+                     color: '#16a34a', fontSize: 13, cursor: 'pointer',
+                     padding: '6px 10px', minHeight: 44, fontWeight: 500 }}
+          >
+            🗑 Clear
+          </button>
+          <button
+            onClick={cancelRecording}
+            style={{ background: '#fff', border: '1px solid #fca5a5', borderRadius: 7,
+                     color: '#dc2626', fontSize: 13, cursor: 'pointer',
+                     padding: '6px 10px', minHeight: 44, fontWeight: 500 }}
+          >
+            ✕ Cancel
+          </button>
+        </div>
+      )}
 
       {/* type a sale */}
       <p style={{ margin: '0 0 6px', fontSize: 13, color: '#6b7280' }}>or type a sale</p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <input
           value={typedText}
-          onChange={(e) => setTypedText(e.target.value)}
+          onChange={(e) => { setTypedText(e.target.value); if (e.target.value) { setShowBanner(false); clearTimeout(bannerTimerRef.current) } }}
           onKeyDown={(e) => { if (e.key === 'Enter') parseSale(typedText) }}
           placeholder="e.g. Sold 2 bags of sugar to Alice, paid 150"
           style={{ flex: 1, padding: '10px 12px', fontSize: 14, borderRadius: 8,
@@ -924,7 +1014,8 @@ function MicTest({ session }) {
         <button
           onClick={() => parseSale(typedText)}
           disabled={parsing || !typedText.trim()}
-          style={{ ...btnStyle('#16a34a'), minWidth: 72, minHeight: 44 }}
+          style={{ ...btnStyle('#16a34a'), minWidth: 72, minHeight: 44,
+                   boxShadow: '0 2px 6px rgba(22,163,74,0.3)' }}
         >
           {parsing ? 'Reviewing…' : 'Review'}
         </button>
@@ -1369,6 +1460,50 @@ function MicTest({ session }) {
           <audio controls src={audioUrl} style={{ display: 'block', width: '100%' }} />
         </div>
       )}
+
+      {/* success banner (fixed bottom, above nav bar) */}
+      {showBanner && (
+        <div
+          onClick={() => { setShowBanner(false); clearTimeout(bannerTimerRef.current) }}
+          style={{
+            position: 'fixed', bottom: 64, left: '50%', transform: 'translateX(-50%)',
+            width: 'calc(100% - 32px)', maxWidth: 448,
+            background: '#16a34a', color: '#fff',
+            borderRadius: 14, padding: '14px 16px',
+            display: 'flex', alignItems: 'center',
+            gap: 12, zIndex: 20, cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(22,163,74,0.35)',
+          }}
+        >
+          {/* white circle with green check */}
+          <div style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: '#fff', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, color: '#16a34a',
+          }}>
+            ✓
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontWeight: 700, fontSize: 15 }}>Sale recorded successfully!</p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, opacity: 0.88 }}>
+              Tap to record another or review details.
+            </p>
+          </div>
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'rgba(255,255,255,0.35)', flexShrink: 0 }} />
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowBanner(false); clearTimeout(bannerTimerRef.current); onViewDashboard?.() }}
+            style={{
+              background: 'none', color: '#fff', border: 'none',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              flexShrink: 0, minHeight: 44, padding: '0 4px',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            View ›
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1378,8 +1513,8 @@ function MicTest({ session }) {
 function MiniStat({ label, value }) {
   return (
     <div style={miniStatStyle}>
-      <span style={{ fontSize: 11, color: '#6b7280' }}>{label}</span>
-      <strong style={{ fontSize: 15, display: 'block' }}>{value}</strong>
+      <span style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 4 }}>{label}</span>
+      <strong style={{ fontSize: 17, display: 'block', color: '#1a1a1a', lineHeight: 1.2 }}>{value}</strong>
     </div>
   )
 }
@@ -1413,12 +1548,12 @@ const micBtnStyle = (recording) => ({
   border: 'none', cursor: 'pointer',
   background: recording ? '#dc2626' : '#16a34a',
   color: '#fff',
-  boxShadow: recording ? '0 0 0 6px rgba(220,38,38,0.2)' : '0 2px 8px rgba(0,0,0,0.15)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
 })
 
 const miniStatStyle = {
-  flex: 1, background: '#f9fafb', border: '1px solid #e5e7eb',
-  borderRadius: 10, padding: '8px 10px', minWidth: 0,
+  flex: 1, background: '#ffffff', border: '1px solid #e5e7eb',
+  borderRadius: 12, padding: '10px 10px', minWidth: 0,
 }
 
 const btnStyle = (bg) => ({

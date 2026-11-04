@@ -144,7 +144,10 @@ function App() {
       {/* ── page content ── */}
       <main style={{ flex: 1, paddingBottom: 72 }}>
         {tab === 'home' && (
-          <MicTest session={session} />
+          <MicTest
+            session={session}
+            onViewDashboard={() => { setTab('dashboard'); setRefresh((n) => n + 1) }}
+          />
         )}
         {tab === 'dashboard' && (
           <Dashboard
