@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { pluralUnit } from '../lib/receipt'
+import Icon from '../components/Icon'
 
 function fmt(n) {
   return Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -334,7 +335,9 @@ export default function Stock({ userId }) {
       <div style={{ display: 'flex', justifyContent: 'space-between',
                     alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16 }}>Stock</h3>
-        <button onClick={load} style={ghostBtn}>↺ Refresh</button>
+        <button onClick={load} style={{ ...ghostBtn, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="refresh" size={20} /> Refresh
+        </button>
       </div>
 
       {/* add product button / form */}

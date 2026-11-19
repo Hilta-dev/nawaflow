@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import MicTest from './pages/MicTest'
 import Dashboard from './pages/Dashboard'
 import Stock from './pages/Stock'
+import Icon from './components/Icon'
 
 // ── inline shop name editor for the account menu ─────────────────────────────
 function ShopNameMenuItem({ session }) {
@@ -167,21 +168,21 @@ function App() {
           onClick={() => setTab('home')}
           style={navBtn(tab === 'home')}
         >
-          <span style={{ fontSize: 20 }}>🏠</span>
+          <Icon name="home" size={24} />
           <span>Home</span>
         </button>
         <button
           onClick={() => { setTab('dashboard'); setRefresh((n) => n + 1) }}
           style={navBtn(tab === 'dashboard')}
         >
-          <span style={{ fontSize: 20 }}>📊</span>
+          <Icon name="dashboard" size={24} />
           <span>Dashboard</span>
         </button>
         <button
           onClick={() => setTab('stock')}
           style={navBtn(tab === 'stock')}
         >
-          <span style={{ fontSize: 20 }}>📦</span>
+          <Icon name="stock" size={24} />
           <span>Stock</span>
         </button>
       </nav>

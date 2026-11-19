@@ -5,6 +5,7 @@ import { saveSaleAction, savePaymentAction } from '../lib/saveSale'
 import { isValidPhone, normalisePhone, findPhoneOwner } from '../lib/phone'
 import { buildSaleReceiptText, buildPaymentReceiptText, pluralUnit } from '../lib/receipt'
 import ReceiptCard from '../components/ReceiptCard'
+import Icon from '../components/Icon'
 
 const PHONE_INVALID_MSG =
   'That number does not look right. Namibian mobile numbers look like 081 234 5678.'
@@ -954,7 +955,7 @@ function MicTest({ session, onViewDashboard }) {
             style={micBtnStyle(isRecording)}
             aria-label={isRecording ? 'Stop recording' : 'Start recording'}
           >
-            {isRecording ? '⏹' : '🎙'}
+            <Icon name={isRecording ? 'stop' : 'mic'} size={32} />
           </button>
         </div>
         <span style={{ marginTop: 10, fontSize: 13, color: '#6b7280', fontWeight: 500 }}>
@@ -985,17 +986,19 @@ function MicTest({ session, onViewDashboard }) {
             onClick={begin}
             style={{ background: '#fff', border: '1px solid #16a34a', borderRadius: 7,
                      color: '#16a34a', fontSize: 13, cursor: 'pointer',
-                     padding: '6px 10px', minHeight: 44, fontWeight: 500 }}
+                     padding: '6px 10px', minHeight: 44, fontWeight: 500,
+                     display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            🗑 Clear
+            <Icon name="trash" size={20} /> Clear
           </button>
           <button
             onClick={cancelRecording}
             style={{ background: '#fff', border: '1px solid #fca5a5', borderRadius: 7,
                      color: '#dc2626', fontSize: 13, cursor: 'pointer',
-                     padding: '6px 10px', minHeight: 44, fontWeight: 500 }}
+                     padding: '6px 10px', minHeight: 44, fontWeight: 500,
+                     display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            ✕ Cancel
+            <Icon name="close" size={20} /> Cancel
           </button>
         </div>
       )}
@@ -1045,9 +1048,10 @@ function MicTest({ session, onViewDashboard }) {
         <button
           onClick={() => parseSale(finalText)}
           disabled={parsing}
-          style={{ ...btnStyle('#16a34a'), marginTop: 8, width: '100%', minHeight: 44 }}
+          style={{ ...btnStyle('#16a34a'), marginTop: 8, width: '100%', minHeight: 44,
+                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
-          {parsing ? 'Reviewing…' : '✓ Review'}
+          {parsing ? 'Reviewing…' : (<><Icon name="check" size={20} /> Review</>)}
         </button>
       )}
 
@@ -1067,8 +1071,10 @@ function MicTest({ session, onViewDashboard }) {
             <p style={{ margin: '8px 0 4px', fontSize: 13,
                         color: '#92400e', background: '#fef3c7',
                         border: '1px solid #fcd34d', borderRadius: 6,
-                        padding: '6px 10px' }}>
-              ❓ {parsedSale.clarifying_question}
+                        padding: '6px 10px',
+                        display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <Icon name="question" size={20} />
+              <span>{parsedSale.clarifying_question}</span>
             </p>
           )}
 
@@ -1413,11 +1419,20 @@ function MicTest({ session, onViewDashboard }) {
                 minHeight: 44,
                 opacity: confirmDisabled ? 0.5 : 1,
                 cursor: confirmDisabled ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
               }}
             >
-              {saving ? 'Saving…' : paymentOverpaid
-                ? `💾 Record N$${paymentDraft.balance.toFixed(2)} payment`
-                : '💾 Confirm and save'}
+              {saving ? 'Saving…' : (
+                <>
+                  <Icon name="save" size={20} />
+                  {paymentOverpaid
+                    ? `Record N$${paymentDraft.balance.toFixed(2)} payment`
+                    : 'Confirm and save'}
+                </>
+              )}
             </button>
           )}
           <button
@@ -1480,9 +1495,9 @@ function MicTest({ session, onViewDashboard }) {
             width: 36, height: 36, borderRadius: '50%',
             background: '#fff', flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18, color: '#16a34a',
+            color: '#16a34a',
           }}>
-            ✓
+            <Icon name="check" size={20} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ margin: 0, fontWeight: 700, fontSize: 15 }}>Sale recorded successfully!</p>
@@ -1533,8 +1548,8 @@ function SourceBadge({ label, source }) {
                   alignItems: 'center', marginBottom: 8 }}>
       <strong style={{ fontSize: 12, color: '#6b7280' }}>{label}</strong>
       {source && (
-        <span style={badgeStyle}>
-          {isMeta ? '✓ Meta AI' : 'Demo response'}
+        <span style={{ ...badgeStyle, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {isMeta ? (<><Icon name="check" size={12} /> Meta AI</>) : 'Demo response'}
         </span>
       )}
     </div>

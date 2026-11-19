@@ -4,6 +4,7 @@ import { useDashboard } from '../hooks/useDashboard'
 import { isValidPhone, normalisePhone, formatPhone, buildContactUrls, findPhoneOwner } from '../lib/phone'
 import { buildSaleReceiptText, buildPaymentReceiptText } from '../lib/receipt'
 import ReceiptCard from '../components/ReceiptCard'
+import Icon from '../components/Icon'
 
 function fmt(n) {
   return Number(n).toLocaleString('en-NA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -181,7 +182,9 @@ function Dashboard({ userId, session }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16 }}>Dashboard</h3>
-        <button onClick={refresh} style={ghostBtn}>↺ Refresh</button>
+        <button onClick={refresh} style={{ ...ghostBtn, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="refresh" size={20} /> Refresh
+        </button>
       </div>
 
       {/* totals */}
@@ -345,7 +348,9 @@ function Dashboard({ userId, session }) {
                         <strong>{item.customerName}</strong>
                         {!isWalkIn && currentBalance !== null && (
                           currentBalance <= 0
-                            ? <span style={chipGreen}>Settled ✓</span>
+                            ? <span style={{ ...chipGreen, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                Settled <Icon name="check" size={14} />
+                              </span>
                             : <span style={chipAmber}>Still owes N${fmt(currentBalance)}</span>
                         )}
                       </div>
