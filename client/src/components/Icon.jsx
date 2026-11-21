@@ -52,8 +52,10 @@ const ICONS = {
   ),
   expenses: (
     <>
-      <path d="M12 2v20" />
-      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      <path d="M3 7h18v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+      <path d="M3 7l2.5-3.5h13L21 7" />
+      <path d="M12 12h.01" />
+      <path d="M16 12a2 2 0 0 0 0 4h2" />
     </>
   ),
   receipt: (

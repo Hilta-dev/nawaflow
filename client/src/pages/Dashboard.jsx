@@ -134,10 +134,13 @@ function Dashboard({ userId, session }) {
   if (loading) return <p style={msgStyle}>Loading…</p>
   if (error)   return <p style={{ ...msgStyle, color: '#dc2626' }}>Error: {error}</p>
 
-  const { totalSales, totalOwed, customerCount, debtors, recentActivity, customerBalanceMap, customerPhoneMap } = data
+  const {
+    totalSales, totalOwed, customerCount, debtors, recentActivity,
+    customerBalanceMap, customerPhoneMap, totalExpenses, cashMovement,
+  } = data
 
-  // Empty state
-  if (totalSales === 0) {
+  // Empty state when nothing recorded yet
+  if (totalSales === 0 && Number(totalExpenses ?? 0) === 0) {
     return (
       <div style={wrapStyle}>
         <p style={{ color: '#6b7280', textAlign: 'center', padding: '32px 0' }}>
@@ -192,6 +195,22 @@ function Dashboard({ userId, session }) {
         <StatCard label="Total sales"  value={totalSales} />
         <StatCard label="Total owed"   value={`N$${fmt(totalOwed)}`} />
         <StatCard label="Customers"    value={customerCount} />
+      </div>
+
+      <div style={{ ...cardRow, marginTop: 10 }}>
+        <StatCard label="Expenses" value={`N$${fmt(totalExpenses ?? 0)}`} />
+        <div style={statCard}>
+          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4,
+                        textTransform: 'uppercase', letterSpacing: '.04em' }}>
+            Cash movement
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: '#16a34a' }}>
+            N${fmt(cashMovement ?? 0)}
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: 11, color: '#9ca3af', lineHeight: 1.3 }}>
+            Cash movement is not profit
+          </p>
+        </div>
       </div>
 
       {/* debtors */}

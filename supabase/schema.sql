@@ -113,3 +113,20 @@ create policy "own items delete" on transaction_items for delete
 
 -- add optional phone number to customers (run once on existing databases)
 alter table customers add column if not exists phone text;
+
+-- expenses table
+create table if not exists expenses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  category text not null,
+  amount numeric(12,2) not null,
+  method text not null,
+  note text,
+  expense_date date not null default current_date,
+  created_at timestamptz not null default now()
+);
+
+alter table expenses enable row level security;
+
+create policy "own expenses" on expenses for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());

@@ -137,7 +137,8 @@ async function realReplyWithRetry(system, user) {
       const status = err.status;
       // 4xx: wrong request, no point retrying
       if (status && status >= 400 && status < 500) {
-        console.error('[meta] 4xx error status=%d — not retrying', status);
+        console.error('[meta] 4xx error status=%d model=%s base=%s', status, MODEL, BASE);
+console.error('[meta] 4xx reason: %s', String(err.body).slice(0, 300));
         throw err;
       }
       // Network error or 5xx: log and maybe retry

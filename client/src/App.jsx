@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import MicTest from './pages/MicTest'
 import Dashboard from './pages/Dashboard'
 import Stock from './pages/Stock'
+import Expenses from './pages/Expenses'
 import Icon from './components/Icon'
 
 // ── inline shop name editor for the account menu ─────────────────────────────
@@ -160,6 +161,12 @@ function App() {
         {tab === 'stock' && (
           <Stock userId={userId} />
         )}
+        {tab === 'expenses' && (
+          <Expenses
+            userId={userId}
+            onGoHome={() => setTab('home')}
+          />
+        )}
       </main>
 
       {/* ── bottom nav ── */}
@@ -184,6 +191,13 @@ function App() {
         >
           <Icon name="stock" size={24} />
           <span>Stock</span>
+        </button>
+        <button
+          onClick={() => setTab('expenses')}
+          style={navBtn(tab === 'expenses')}
+        >
+          <Icon name="expenses" size={24} />
+          <span>Expenses</span>
         </button>
       </nav>
     </div>

@@ -28,7 +28,7 @@ export function useDashboard(userId) {
     setLoading(true)
     setError('')
     try {
-      const [salesCountRes, custRes, recentSalesRes, recentPaysRes] = await Promise.all([
+      const [salesCountRes, custRes, recentSalesRes, recentPaysRes, salesPaidRes, paymentsTotalRes, expensesRes] = await Promise.all([
 
         // Count of sale transactions only
         supabase
@@ -68,12 +68,35 @@ export function useDashboard(userId) {
           .eq('type', 'payment')
           .order('created_at', { ascending: false })
           .limit(30),
+
+        // money collected from sales (paid at sale)
+        supabase
+          .from('transactions')
+          .select('paid')
+          .eq('user_id', userId)
+          .eq('type', 'sale'),
+
+        // money collected from customer payments
+        supabase
+          .from('transactions')
+          .select('total')
+          .eq('user_id', userId)
+          .eq('type', 'payment'),
+
+        // all expenses for totals
+        supabase
+          .from('expenses')
+          .select('amount')
+          .eq('user_id', userId),
       ])
 
       if (salesCountRes.error) throw salesCountRes.error
       if (custRes.error)       throw custRes.error
       if (recentSalesRes.error) throw recentSalesRes.error
       if (recentPaysRes.error)  throw recentPaysRes.error
+      if (salesPaidRes.error)   throw salesPaidRes.error
+      if (paymentsTotalRes.error) throw paymentsTotalRes.error
+      if (expensesRes.error)    throw expensesRes.error
 
       const customers = custRes.data ?? []
 
@@ -81,6 +104,16 @@ export function useDashboard(userId) {
       const totalSales    = salesCountRes.count ?? 0
       const totalOwed     = customers.reduce((sum, c) => sum + Number(c.balance_owed ?? 0), 0)
       const customerCount = customers.filter(c => c.name?.toLowerCase() !== 'walk-in').length
+
+      const collectedFromSales = (salesPaidRes.data ?? [])
+        .reduce((sum, t) => sum + Number(t.paid ?? 0), 0)
+      const collectedFromPayments = (paymentsTotalRes.data ?? [])
+        .reduce((sum, t) => sum + Number(t.total ?? 0), 0)
+      const totalCollected = Math.round((collectedFromSales + collectedFromPayments) * 100) / 100
+      const totalExpenses = Math.round(
+        (expensesRes.data ?? []).reduce((sum, e) => sum + Number(e.amount ?? 0), 0) * 100
+      ) / 100
+      const cashMovement = Math.round((totalCollected - totalExpenses) * 100) / 100
 
       // Debtors: balance_owed > 0, biggest first
       const debtors = customers
@@ -120,7 +153,19 @@ export function useDashboard(userId) {
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 30)
 
-      setData({ totalSales, totalOwed, customerCount, debtors, recentSales, recentPayments, recentActivity, customerBalanceMap, customerPhoneMap })
+      setData({
+        totalSales,
+        totalOwed,
+        customerCount,
+        debtors,
+        recentSales,
+        recentPayments,
+        recentActivity,
+        customerBalanceMap,
+        customerPhoneMap,
+        totalExpenses,
+        cashMovement,
+      })
     } catch (err) {
       setError(err.message || 'Failed to load dashboard')
     } finally {
