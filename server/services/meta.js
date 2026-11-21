@@ -138,7 +138,14 @@ async function realReplyWithRetry(system, user) {
       // 4xx: wrong request, no point retrying
       if (status && status >= 400 && status < 500) {
         console.error('[meta] 4xx error status=%d model=%s base=%s', status, MODEL, BASE);
-console.error('[meta] 4xx reason: %s', String(err.body).slice(0, 300));
+        console.error('[meta] key length=%d', String(process.env.META_API_KEY || '').length);
+        try {
+          const list = await fetch(`${BASE}/models`, { headers: { Authorization: `Bearer ${process.env.META_API_KEY}` } });
+          const data = await list.json();
+          console.error('[meta] models for this key: %s', (data.data || []).map((m) => m.id).join(', '));
+        } catch (e) {
+          console.error('[meta] could not list models');
+        }
         throw err;
       }
       // Network error or 5xx: log and maybe retry
