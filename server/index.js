@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { createHash } from 'crypto';
 import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -11,8 +12,9 @@ import { attachTranscribeWs } from './routes/transcribe.js';
 //startup check: list available models once so logs show what the key can access
 async function logAvailableModels() {
   const base  = process.env.META_API_BASE || 'https://api.meta.ai/v1';
-  const key   = String(process.env.META_API_KEY || '').trim().replace(/^["']+|["']+$/g, '');
-  const model = process.env.META_MODEL || 'muse-spark-1.1';
+  const key         = String(process.env.META_API_KEY || '').trim().replace(/^["']+|["']+$/g, '');
+  const fingerprint = createHash('sha256').update(key).digest('hex').slice(0, 8);
+  const model       = process.env.META_MODEL || 'muse-spark-1.1';
   if (!key) {
     console.log('[meta startup] no META_API_KEY set, running in mock mode');
     return;
@@ -26,8 +28,8 @@ async function logAvailableModels() {
       const data = await res.json();
       names = (data.data ?? data.models ?? []).map((m) => m.id ?? m.name ?? JSON.stringify(m));
     }
-    console.log('[meta startup] models status=%d count=%d names=%s configured_model=%s base=%s',
-      res.status, names.length, names.join(', ') || '(none)', model, base);
+    console.log('[meta startup] models status=%d count=%d names=%s configured_model=%s base=%s fingerprint=%s',
+      res.status, names.length, names.join(', ') || '(none)', model, base, fingerprint);
   } catch (err) {
     console.log('[meta startup] could not reach models endpoint: %s', err.message);
   }
