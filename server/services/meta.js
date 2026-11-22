@@ -173,5 +173,11 @@ export async function chatJSON({ system, user }) {
   if (isMockMode()) {
     return { text: mockReply(user), source: 'mock' };
   }
-  return { text: await realReplyWithRetry(system, user), source: 'meta' };
+  try {
+    return { text: await realReplyWithRetry(system, user), source: 'meta' };
+  } catch (err) {
+    console.error('[meta] falling back to backup parser status=%s reason=%s',
+      err.status ?? 'network', String(err.body || err.message).slice(0, 200));
+    return { text: mockReply(user), source: 'backup' };
+  }
 }

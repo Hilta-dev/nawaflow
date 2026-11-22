@@ -1543,13 +1543,14 @@ function SourceBadge({ label, source }) {
         borderRadius: 4, padding: '1px 6px', fontWeight: 600 }
     : { fontSize: 11, background: '#fef9c3', color: '#854d0e',
         borderRadius: 4, padding: '1px 6px' }
+  const badgeLabel = isMeta ? 'Meta AI' : 'Basic mode'
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between',
                   alignItems: 'center', marginBottom: 8 }}>
       <strong style={{ fontSize: 12, color: '#6b7280' }}>{label}</strong>
       {source && (
         <span style={{ ...badgeStyle, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {isMeta ? (<><Icon name="check" size={12} /> Meta AI</>) : 'Demo response'}
+          {isMeta ? (<><Icon name="check" size={12} /> {badgeLabel}</>) : badgeLabel}
         </span>
       )}
     </div>
